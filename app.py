@@ -3,6 +3,7 @@ import yfinance as yf
 import pandas as pd
 import glob
 import time
+import os
 
 st.set_page_config(page_title="東証全銘柄スクリーナー", layout="wide")
 st.title("📱 東証全銘柄カスタムスクリーナー")
@@ -10,6 +11,7 @@ st.title("📱 東証全銘柄カスタムスクリーナー")
 # GitHubリポジトリ内のExcel/CSVファイルを自動検索して読み込む
 @st.cache_data
 def get_jpx_tickers():
+    # 貸借リスト用ファイル(taishaku.*)を除外して銘柄一覧を取得
     all_files = glob.glob("*.xls*") + glob.glob("*.csv")
     files = [f for f in all_files if not f.lower().startswith("taishaku")]
     
@@ -37,12 +39,16 @@ def get_jpx_tickers():
 
         # --- 貸借銘柄の判定ロジック ---
         has_taishaku_info = False
+        
+        # パターン1: メインのExcel/CSV内に「貸借」を含む列名がある場合
         t_cols = [c for c in df.columns if "貸借" in c]
         if t_cols:
             t_col = t_cols[0]
+            # 「貸借」または「1」などのフラグが立っているものを貸借銘柄とみなす
             df["is_taishaku"] = df[t_col].astype(str).str.contains("貸借|1|対象", na=False)
             has_taishaku_info = True
         else:
+            # パターン2: 別ファイル (taishaku.csv / taishaku.xlsx) が存在する場合
             t_files = [f for f in all_files if f.lower().startswith("taishaku")]
             if t_files:
                 tf = t_files[0]
@@ -79,7 +85,7 @@ def get_price_limit(base_price):
 
 jpx_df, has_taishaku_info = get_jpx_tickers()
 
-with st.expander("⚙️ スクリーニング条件・対象市場（上昇・下落を同時抽出）", expanded=True):
+with st.expander("⚙️ スクリーニング条件・対象市場", expanded=True):
     col1, col2 = st.columns(2)
     with col1:
         market_option = st.selectbox(
@@ -97,11 +103,16 @@ with st.expander("⚙️ スクリーニング条件・対象市場（上昇・�
             ["すべて（指定なし）", "貸借銘柄のみ", "貸借銘柄以外（制度信用・一般のみ）"]
         )
         if taishaku_option != "すべて（指定なし）" and not has_taishaku_info:
-            st.warning("⚠️ Excel内に『貸借区分』列がないか、`taishaku.csv` が見つからないため絞り込みが機能しません。")
+            st.warning("⚠️ Excel内に『貸借区分』列がないか、リポジトリに `taishaku.csv` が見つからないため絞り込みが機能しません。")
 
     with col2:
+        direction = st.selectbox("⑥ モード切替", ["上昇パターン (+)", "下落パターン (-)"])
         min_turn_oku = st.number_input("⑦ 1日前売買代金 (億円以上)", min_value=0.0, value=5.0, step=1.0)
-        st.info("💡 1回のスキャンで「📈上昇パターン」と「📉下落パターン」の両方を同時に抽出します。")
+
+    is_up = "上昇" in direction
+    sign = "+" if is_up else "-"
+    s_label = "S高" if is_up else "S安"
+    gap_label = "GDスタート＆前日比" if is_up else "GUスタート＆前日比"
 
     st.markdown("---")
     st.markdown("**判定条件：『グループA（いずれか1つ）』 かつ 『グループB（いずれか1つ）』**")
@@ -110,24 +121,24 @@ with st.expander("⚙️ スクリーニング条件・対象市場（上昇・�
     with g_col1:
         st.info("🅰️ **グループA（1日前の動き：OR条件）**")
         
-        c1_chk = st.checkbox("① 2日前引け比 1日前 (±%以上)", value=True)
+        c1_chk = st.checkbox(f"① 2日前引け比 1日前 ({sign}%以上)", value=True)
         pct1_input = st.number_input("①の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=10.0, step=0.5, key="pct1")
         
         st.write("")
-        c2_chk = st.checkbox("② 1日前 寄り比 (±%以上)", value=True)
+        c2_chk = st.checkbox(f"② 1日前 寄り比 ({sign}%以上)", value=True)
         pct2_input = st.number_input("②の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=10.0, step=0.5, key="pct2")
         
         st.write("")
-        c3_chk = st.checkbox("③ 1日前 S高 / S安", value=True)
+        c3_chk = st.checkbox(f"③ 1日前 {s_label}", value=True)
 
     with g_col2:
         st.success("🅱️ **グループB（当日の動き：OR条件）**")
         
-        c4_chk = st.checkbox("④ 当日 寄り比 (±%以上)", value=True)
+        c4_chk = st.checkbox(f"④ 当日 寄り比 ({sign}%以上)", value=True)
         pct4_input = st.number_input("④の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct4")
         
         st.write("")
-        c5_chk = st.checkbox("⑤ 当日 GD反発 / GU失速 (±%以上)", value=True)
+        c5_chk = st.checkbox(f"⑤ 当日 {gap_label} ({sign}%以上)", value=True)
         pct5_input = st.number_input("⑤の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct5")
 
 # 対象銘柄の絞り込み
@@ -145,6 +156,7 @@ if not jpx_df.empty:
     else:
         target_df = jpx_df
 
+    # 貸借区分の絞り込み適用
     if has_taishaku_info:
         if taishaku_option == "貸借銘柄のみ":
             target_df = target_df[target_df["is_taishaku"] == True]
@@ -153,7 +165,7 @@ if not jpx_df.empty:
 
     st.caption(f"現在のスキャン対象：{len(target_df):,} 銘柄")
 
-if st.button("🚀 東証全銘柄から一括スクリーニング開始（上昇・下落同時）", type="primary", use_container_width=True):
+if st.button("🚀 東証全銘柄から一括スクリーニング開始", type="primary", use_container_width=True):
     if target_df.empty:
         st.warning("対象銘柄が0件です。")
         st.stop()
@@ -176,8 +188,8 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始（上�
     pct5 = pct5_input / 100.0
     
     min_turnover = min_turn_oku * 100_000_000
-    hits_up = []
-    hits_down = []
+    is_up = "上昇" in direction
+    hits = []
     
     batch_size = 50
     total_batches = (len(codes) + batch_size - 1) // batch_size
@@ -223,37 +235,29 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始（上�
                     continue
 
                 limit1 = get_price_limit(c2)
-                market_short = code_to_market.get(code, "").replace("（内国株式）", "")
-                taishaku_label = "貸借" if code_to_taishaku.get(code) else "-"
 
-                # 共通のベースデータ作成関数
-                def build_row(tags_a, tags_b):
-                    row = {
-                        "コード": code,
-                        "銘柄名": code_to_name.get(code, ""),
-                        "市場": market_short,
-                    }
-                    if has_taishaku_info:
-                        row["区分"] = taishaku_label
-                    row.update({
-                        "2日前終値": f"{c2:,.0f}",
-                        "1日前終値": f"{c1:,.0f} ({(c1-c2)/c2*100:+.1f}%)",
-                        "1日前売買代金": f"{turn1/100_000_000:.1f}億円",
-                        "当日始値": f"{o0:,.0f}",
-                        "当日現在値": f"{c0:,.0f} ({(c0-c1)/c1*100:+.1f}%)",
-                        "該当条件(A)": " / ".join(tags_a),
-                        "該当条件(B)": " / ".join(tags_b)
-                    })
-                    return row
+                if is_up:
+                    res_a = [
+                        (c1 - c2) / c2 >= pct1,
+                        (c1 - o1) / o1 >= pct2,
+                        c1 >= c2 + limit1
+                    ]
+                    names_a = [f"①2日前比({pct1_input}%)", f"②1日前寄り比({pct2_input}%)", "③S高"]
 
-                # --- 1. 上昇パターンの判定 ---
-                res_a_up = [
-                    (c1 - c2) / c2 >= pct1,
-                    (c1 - o1) / o1 >= pct2,
-                    c1 >= c2 + limit1
-                ]
-                names_a_up = [f"①2日前比(+{pct1_input}%)", f"②1日前寄り比(+{pct2_input}%)", "③S高"]
+                    res_b = [
+                        (c0 - o0) / o0 >= pct4,
+                        (o0 < c1) and ((c0 - c1) / c1 >= pct5)
+                    ]
+                    names_b = [f"④当日寄り比({pct4_input}%)", f"⑤GD反発({pct5_input}%)"]
+                else:
+                    res_a = [
+                        (c1 - c2) / c2 <= -pct1,
+                        (c1 - o1) / o1 <= -pct2,
+                        c1 <= c2 - limit1
+                    ]
+                    names_a = [f"①2日前比(-{pct1_input}%)", f"②1日前寄り比(-{pct2_input}%)", "③S安"]
 
-                res_b_up = [
-                    (c0 - o0) / o0 >= pct4,
-                    (o0 < c1) and ((c0 - c1) / c1 >= pct5)
+                    res_b = [
+                        (c0 - o0) / o0 <= -pct4,
+                        (o0 > c1) and ((c0 - c1) / c1 <= -pct5)
+                    ]
