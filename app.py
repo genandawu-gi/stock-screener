@@ -69,9 +69,8 @@ with st.expander("⚙️ スクリーニング条件・対象市場", expanded=T
                 "ETF・REIT含む全上場銘柄"
             ]
         )
-        direction = st.selectbox("⑥ モード切替", ["上昇パターン (+)", "下落パターン (-)"])
     with col2:
-        pct_input = st.number_input("基準騰落率 (%)", min_value=0.1, max_value=100.0, value=10.0, step=0.5)
+        direction = st.selectbox("⑥ モード切替", ["上昇パターン (+)", "下落パターン (-)"])
         min_turn_oku = st.number_input("⑦ 1日前売買代金 (億円以上)", min_value=0.0, value=5.0, step=1.0)
 
     is_up = "上昇" in direction
@@ -85,14 +84,26 @@ with st.expander("⚙️ スクリーニング条件・対象市場", expanded=T
     g_col1, g_col2 = st.columns(2)
     with g_col1:
         st.info("🅰️ **グループA（1日前の動き：OR条件）**")
-        c1_chk = st.checkbox(f"① 2日前引け比 1日前 {sign}{pct_input}%以上", value=True)
-        c2_chk = st.checkbox(f"② 1日前 寄り比 {sign}{pct_input}%以上", value=True)
+        
+        c1_chk = st.checkbox(f"① 2日前引け比 1日前 ({sign}%以上)", value=True)
+        pct1_input = st.number_input("①の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=10.0, step=0.5, key="pct1")
+        
+        st.write("") # 余白
+        c2_chk = st.checkbox(f"② 1日前 寄り比 ({sign}%以上)", value=True)
+        pct2_input = st.number_input("②の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=10.0, step=0.5, key="pct2")
+        
+        st.write("") # 余白
         c3_chk = st.checkbox(f"③ 1日前 {s_label}", value=True)
 
     with g_col2:
         st.success("🅱️ **グループB（当日の動き：OR条件）**")
-        c4_chk = st.checkbox(f"④ 当日 寄り比 {sign}{pct_input}%以上", value=True)
-        c5_chk = st.checkbox(f"⑤ 当日 {gap_label} {sign}{pct_input}%以上", value=True)
+        
+        c4_chk = st.checkbox(f"④ 当日 寄り比 ({sign}%以上)", value=True)
+        pct4_input = st.number_input("④の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct4")
+        
+        st.write("") # 余白
+        c5_chk = st.checkbox(f"⑤ 当日 {gap_label} ({sign}%以上)", value=True)
+        pct5_input = st.number_input("⑤の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct5")
 
 target_df = pd.DataFrame()
 if not jpx_df.empty:
@@ -124,7 +135,13 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
     code_to_name = dict(zip(target_df["コード"], target_df["銘柄名"]))
     code_to_market = dict(zip(target_df["コード"], target_df["市場・商品区分"]))
     codes = target_df["コード"].tolist()
-    pct = pct_input / 100.0
+    
+    # 個別の騰落率を小数に変換
+    pct1 = pct1_input / 100.0
+    pct2 = pct2_input / 100.0
+    pct4 = pct4_input / 100.0
+    pct5 = pct5_input / 100.0
+    
     min_turnover = min_turn_oku * 100_000_000
     is_up = "上昇" in direction
     hits = []
@@ -177,30 +194,30 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
 
                 if is_up:
                     res_a = [
-                        (c1 - c2) / c2 >= pct,
-                        (c1 - o1) / o1 >= pct,
+                        (c1 - c2) / c2 >= pct1,
+                        (c1 - o1) / o1 >= pct2,
                         c1 >= c2 + limit1
                     ]
-                    names_a = ["①2日前比", "②1日前寄り比", "③S高"]
+                    names_a = [f"①2日前比({pct1_input}%)", f"②1日前寄り比({pct2_input}%)", "③S高"]
 
                     res_b = [
-                        (c0 - o0) / o0 >= pct,
-                        (o0 < c1) and ((c0 - c1) / c1 >= pct)
+                        (c0 - o0) / o0 >= pct4,
+                        (o0 < c1) and ((c0 - c1) / c1 >= pct5)
                     ]
-                    names_b = ["④当日寄り比", "⑤GD反発"]
+                    names_b = [f"④当日寄り比({pct4_input}%)", f"⑤GD反発({pct5_input}%)"]
                 else:
                     res_a = [
-                        (c1 - c2) / c2 <= -pct,
-                        (c1 - o1) / o1 <= -pct,
+                        (c1 - c2) / c2 <= -pct1,
+                        (c1 - o1) / o1 <= -pct2,
                         c1 <= c2 - limit1
                     ]
-                    names_a = ["①2日前比", "②1日前寄り比", "③S安"]
+                    names_a = [f"①2日前比(-{pct1_input}%)", f"②1日前寄り比(-{pct2_input}%)", "③S安"]
 
                     res_b = [
-                        (c0 - o0) / o0 <= -pct,
-                        (o0 > c1) and ((c0 - c1) / c1 <= -pct)
+                        (c0 - o0) / o0 <= -pct4,
+                        (o0 > c1) and ((c0 - c1) / c1 <= -pct5)
                     ]
-                    names_b = ["④当日寄り比", "⑤GU失速"]
+                    names_b = [f"④当日寄り比(-{pct4_input}%)", f"⑤GU失速(-{pct5_input}%)"]
 
                 # グループA（OR）とグループB（OR）の評価
                 eval_a = [r for r, flag in zip(res_a, flags_a) if flag]
