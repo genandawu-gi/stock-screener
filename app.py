@@ -10,7 +10,7 @@ st.title("📱 東証全銘柄カスタムスクリーナー")
 # GitHubリポジトリ内に置いた東証上場銘柄一覧（data_j.xls）を読み込む
 @st.cache_data
 def get_jpx_tickers():
-    if os.path.exists("data_j.xls"):
+    if os.path.exists("data_j.xlsx"):
         try:
             df = pd.read_excel("data_j.xls", engine="xlrd")
             df["コード"] = df["コード"].astype(str).str.strip()
