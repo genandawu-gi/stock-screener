@@ -86,11 +86,11 @@ with st.expander("⚙️ スクリーニング条件・対象市場", expanded=T
         st.info("🅰️ **グループA（1日前の動き：OR条件）**")
         
         c1_chk = st.checkbox(f"① 2日前引け比 1日前 ({sign}%以上)", value=True)
-        pct1_input = st.number_input("①の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=10.0, step=0.5, key="pct1")
+        pct1_input = st.number_input("①の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct1")
         
         st.write("")
         c2_chk = st.checkbox(f"② 1日前 寄り比 ({sign}%以上)", value=True)
-        pct2_input = st.number_input("②の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=10.0, step=0.5, key="pct2")
+        pct2_input = st.number_input("②の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct2")
         
         st.write("")
         c3_chk = st.checkbox(f"③ 1日前 {s_label}", value=True)
