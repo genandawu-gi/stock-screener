@@ -122,8 +122,10 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始（上�
 
     flags_a = [c1_chk, c2_chk, c3_chk]
     flags_b = [c4_chk, c5_chk]
-    use_a = any(flags_a)
-    use_b = any(flags_b)
+
+    if not any(flags_a) or not any(flags_b):
+        st.warning("グループA（①〜③）とグループB（④〜⑤）のそれぞれで、最低1つ以上の条件にチェックを入れてください。")
+        st.stop()
 
     code_to_name = dict(zip(target_df["コード"], target_df["銘柄名"]))
     code_to_market = dict(zip(target_df["コード"], target_df["市場・商品区分"]))
@@ -186,20 +188,6 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始（上�
                 limit1 = get_price_limit(c2)
                 market_short = code_to_market.get(code, "").replace("（内国株式）", "")
 
-                def build_row(tags_a, tags_b):
-                    return {
-                        "コード": code,
-                        "銘柄名": code_to_name.get(code, ""),
-                        "市場": market_short,
-                        "2日前終値": f"{c2:,.0f}",
-                        "1日前終値": f"{c1:,.0f} ({(c1-c2)/c2*100:+.1f}%)",
-                        "1日前売買代金": f"{turn1/100_000_000:.1f}億円",
-                        "当日始値": f"{o0:,.0f}",
-                        "当日現在値": f"{c0:,.0f} ({(c0-c1)/c1*100:+.1f}%)",
-                        "該当条件(A)": " / ".join(tags_a) if tags_a else "指定なし",
-                        "該当条件(B)": " / ".join(tags_b) if tags_b else "指定なし"
-                    }
-
                 # --- 1. 上昇パターンの判定 ---
                 res_a_up = [
                     (c1 - c2) / c2 >= pct1,
@@ -214,13 +202,24 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始（上�
                 ]
                 names_b_up = [f"④当日寄り比(+{pct4_input}%)", f"⑤GD反発(+{pct5_input}%)"]
 
-                match_a_up = any(r for r, f in zip(res_a_up, flags_a) if f) if use_a else True
-                match_b_up = any(r for r, f in zip(res_b_up, flags_b) if f) if use_b else True
+                eval_a_up = [r for r, flag in zip(res_a_up, flags_a) if flag]
+                eval_b_up = [r for r, flag in zip(res_b_up, flags_b) if flag]
 
-                if match_a_up and match_b_up:
-                    t_a = [n for r, f, n in zip(res_a_up, flags_a, names_a_up) if r and f]
-                    t_b = [n for r, f, n in zip(res_b_up, flags_b, names_b_up) if r and f]
-                    hits_up.append(build_row(t_a, t_b))
+                if any(eval_a_up) and any(eval_b_up):
+                    hit_tags_a = [n for r, flag, n in zip(res_a_up, flags_a, names_a_up) if r and flag]
+                    hit_tags_b = [n for r, flag, n in zip(res_b_up, flags_b, names_b_up) if r and flag]
+                    hits_up.append({
+                        "コード": code,
+                        "銘柄名": code_to_name.get(code, ""),
+                        "市場": market_short,
+                        "2日前終値": f"{c2:,.0f}",
+                        "1日前終値": f"{c1:,.0f} ({(c1-c2)/c2*100:+.1f}%)",
+                        "1日前売買代金": f"{turn1/100_000_000:.1f}億円",
+                        "当日始値": f"{o0:,.0f}",
+                        "当日現在値": f"{c0:,.0f} ({(c0-c1)/c1*100:+.1f}%)",
+                        "該当条件(A)": " / ".join(hit_tags_a),
+                        "該当条件(B)": " / ".join(hit_tags_b)
+                    })
 
                 # --- 2. 下落パターンの判定 ---
                 res_a_down = [
@@ -236,25 +235,18 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始（上�
                 ]
                 names_b_down = [f"④当日寄り比(-{pct4_input}%)", f"⑤GU失速(-{pct5_input}%)"]
 
-                match_a_down = any(r for r, f in zip(res_a_down, flags_a) if f) if use_a else True
-                match_b_down = any(r for r, f in zip(res_b_down, flags_b) if f) if use_b else True
+                eval_a_down = [r for r, flag in zip(res_a_down, flags_a) if flag]
+                eval_b_down = [r for r, flag in zip(res_b_down, flags_b) if flag]
 
-                if match_a_down and match_b_down:
-                    t_a = [n for r, f, n in zip(res_a_down, flags_a, names_a_down) if r and f]
-                    t_b = [n for r, f, n in zip(res_b_down, flags_b, names_b_down) if r and f]
-                    hits_down.append(build_row(t_a, t_b))
-
-            except Exception:
-                continue
-
-        progress_bar.progress((b_idx + 1) / total_batches)
-        time.sleep(0.1)
-
-    status_text.empty()
-    progress_bar.empty()
-
-    # --- 結果の同時表示 ---
-    st.markdown("---")
-    tab_up, tab_down = st.tabs([f"📈 上昇パターン ({len(hits_up)} 件)", f"📉 下落パターン ({len(hits_down)} 件)"])
-
-    with tab_up:
+                if any(eval_a_down) and any(eval_b_down):
+                    hit_tags_a = [n for r, flag, n in zip(res_a_down, flags_a, names_a_down) if r and flag]
+                    hit_tags_b = [n for r, flag, n in zip(res_b_down, flags_b, names_b_down) if r and flag]
+                    hits_down.append({
+                        "コード": code,
+                        "銘柄名": code_to_name.get(code, ""),
+                        "市場": market_short,
+                        "2日前終値": f"{c2:,.0f}",
+                        "1日前終値": f"{c1:,.0f} ({(c1-c2)/c2*100:+.1f}%)",
+                        "1日前売買代金": f"{turn1/100_000_000:.1f}億円",
+                        "当日始値": f"{o0:,.0f}",
+                        "当日現在値": f"{c0:,.0f} ({(c0-c1)/c1*100:+.1f}%)",
