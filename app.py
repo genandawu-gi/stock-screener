@@ -37,7 +37,23 @@ def get_price_limit(base_price):
             return limit
     return 10000000
 
-jpx_df = get_jpx_tickers()
+jpx_df = import requests
+import io
+
+@st.cache_data(ttl=86400)
+def get_jpx_tickers():
+    url = "https://jpx.co.jp"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
+        res = requests.get(url, headers=headers, timeout=15)
+        res.raise_for_status()
+        df = pd.read_excel(io.BytesIO(res.content), engine="xlrd")
+        df["コード"] = df["コード"].astype(str).str.strip()
+        return df[["コード", "銘柄名", "市場・商品区分"]]
+    except Exception as e:
+        st.error(f"JPX銘柄一覧の取得に失敗しました: {e}")
+        return pd.DataFrame()
+()
 
 # --- スマホで見やすい設定メニュー ---
 with st.expander("⚙️ スクリーニング条件・対象市場", expanded=True):
