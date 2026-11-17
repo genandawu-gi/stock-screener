@@ -126,7 +126,7 @@ with st.expander("⚙️ スクリーニング条件・対象市場（上昇・�
         c3_chk = st.checkbox(c3_label, key="c3")
 
     with g_col2:
-        st.write("") # ラジオボタン分の高さ調整
+        st.write("")
         st.write("")
         st.success("🅱️ **グループB（当日の動き：OR条件）**")
         
