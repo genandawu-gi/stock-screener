@@ -1,60 +1,26 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import requests
-import io
+import os
 import time
 
 st.set_page_config(page_title="東証全銘柄スクリーナー", layout="wide")
 st.title("📱 東証全銘柄カスタムスクリーナー")
 
-# 海外サーバーからでも確実に取得できる東証上場銘柄一覧を取得（1日キャッシュ）
-@st.cache_data(ttl=86400)
+# GitHubリポジトリ内に置いた東証上場銘柄一覧（data_j.xls）を読み込む
+@st.cache_data
 def get_jpx_tickers():
-    urls = [
-        "https://githubusercontent.com",
-        "https://githubusercontent.com"
-    ]
-    headers = {"User-Agent": "Mozilla/5.0"}
-    
-    for url in urls:
+    if os.path.exists("data_j.xls"):
         try:
-            res = requests.get(url, headers=headers, timeout=15)
-            res.raise_for_status()
-            df = pd.read_csv(io.BytesIO(res.content))
-            if "コード" in df.columns and "銘柄名" in df.columns:
-                df["コード"] = df["コード"].astype(str).str.strip()
-                if "市場・商品区分" not in df.columns:
-                    df["市場・商品区分"] = "東証上場"
-                return df[["コード", "銘柄名", "市場・商品区分"]]
-        except Exception:
-            continue
-
-    # 万が一外部CSVも取得できなかった場合の予備（東証主要・売買代金上位100銘柄リスト）
-    fallback_codes = [
-        ("7203", "トヨタ自動車", "プライム（内国株式）"), ("9984", "ソフトバンクグループ", "プライム（内国株式）"),
-        ("6758", "ソニーグループ", "プライム（内国株式）"), ("8306", "三菱UFJフィナンシャルG", "プライム（内国株式）"),
-        ("6857", "アドバンテスト", "プライム（内国株式）"), ("8035", "東京エレクトロン", "プライム（内国株式）"),
-        ("6146", "ディスコ", "プライム（内国株式）"), ("6920", "レーザーテック", "プライム（内国株式）"),
-        ("7011", "三菱重工業", "プライム（内国株式）"), ("7012", "川崎重工業", "プライム（内国株式）"),
-        ("7013", "IHI", "プライム（内国株式）"), ("9101", "日本郵船", "プライム（内国株式）"),
-        ("9104", "商船三井", "プライム（内国株式）"), ("9107", "川崎汽船", "プライム（内国株式）"),
-        ("5803", "フジクラ", "プライム（内国株式）"), ("5801", "古河電気工業", "プライム（内国株式）"),
-        ("5802", "住友電気工業", "プライム（内国株式）"), ("8316", "三井住友フィナンシャルG", "プライム（内国株式）"),
-        ("8411", "みずほフィナンシャルG", "プライム（内国株式）"), ("8058", "三菱商事", "プライム（内国株式）"),
-        ("8001", "伊藤忠商事", "プライム（内国株式）"), ("8031", "三井物産", "プライム（内国株式）"),
-        ("9983", "ファーストリテイリング", "プライム（内国株式）"), ("6098", "リクルートHD", "プライム（内国株式）"),
-        ("7974", "任天堂", "プライム（内国株式）"), ("4063", "信越化学工業", "プライム（内国株式）"),
-        ("6501", "日立製作所", "プライム（内国株式）"), ("6702", "富士通", "プライム（内国株式）"),
-        ("6701", "NEC", "プライム（内国株式）"), ("9432", "日本電信電話", "プライム（内国株式）"),
-        ("9433", "KDDI", "プライム（内国株式）"), ("9434", "ソフトバンク", "プライム（内国株式）"),
-        ("3778", "さくらインターネット", "プライム（内国株式）"), ("5253", "カバー", "グロース（内国株式）"),
-        ("5595", "QPS研究所", "グロース（内国株式）"), ("9166", "GENDA", "グロース（内国株式）"),
-        ("215A", "タイミー", "グロース（内国株式）"), ("4478", "フリー", "グロース（内国株式）"),
-        ("4485", "JTOWER", "グロース（内国株式）"), ("7342", "ウェルスナビ", "グロース（内国株式）")
-    ]
-    st.warning("外部銘柄一覧に接続できなかったため、内蔵の主要銘柄リストを使用しています。")
-    return pd.DataFrame(fallback_codes, columns=["コード", "銘柄名", "市場・商品区分"])
+            df = pd.read_excel("data_j.xls", engine="xlrd")
+            df["コード"] = df["コード"].astype(str).str.strip()
+            return df[["コード", "銘柄名", "市場・商品区分"]]
+        except Exception as e:
+            st.error(f"data_j.xls の読み込みに失敗しました: {e}")
+            return pd.DataFrame()
+    else:
+        st.warning("GitHubに data_j.xls がアップロードされていません。")
+        return pd.DataFrame()
 
 # 東証の制限値幅テーブル
 def get_price_limit(base_price):
@@ -125,7 +91,7 @@ if not jpx_df.empty:
 
 if st.button("🚀 東証全銘柄から一括スクリーニング開始", type="primary", use_container_width=True):
     if target_df.empty:
-        st.warning("対象銘柄が0件です。市場区分を変更してください。")
+        st.warning("対象銘柄が0件です。")
         st.stop()
 
     code_to_name = dict(zip(target_df["コード"], target_df["銘柄名"]))
