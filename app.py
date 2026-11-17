@@ -7,13 +7,21 @@ import time
 st.set_page_config(page_title="東証全銘柄スクリーナー", layout="wide")
 st.title("📱 東証全銘柄カスタムスクリーナー")
 
+# チェックボックスの初期状態管理
+for key in ["c1", "c2", "c3", "c4", "c5"]:
+    if key not in st.session_state:
+        st.session_state[key] = True
+
 # GitHubリポジトリ内のExcel/CSVファイルを自動検索して読み込む
 @st.cache_data
 def get_jpx_tickers():
-    files = glob.glob("*.xls*") + glob.glob("*.csv")
+    all_files = glob.glob("*.xls*") + glob.glob("*.csv")
+    files = [f for f in all_files if not f.lower().startswith("taishaku")]
+    
     if not files:
         st.warning("GitHubにExcelまたはCSVファイルが見つかりません。")
-        return pd.DataFrame()
+        return pd.DataFrame(), False
+        
     target_file = files[0]
     try:
         if target_file.endswith(".csv"):
@@ -30,12 +38,32 @@ def get_jpx_tickers():
         for c in cols:
             if c not in df.columns:
                 st.error(f"ファイル内に必要な列 '{c}' が見つかりません: {list(df.columns)}")
-                return pd.DataFrame()
-                
-        return df[cols]
+                return pd.DataFrame(), False
+
+        # --- 貸借銘柄の判定ロジック ---
+        has_taishaku_info = False
+        t_cols = [c for c in df.columns if "貸借" in c]
+        if t_cols:
+            t_col = t_cols[0]
+            df["is_taishaku"] = df[t_col].astype(str).str.contains("貸借|1|対象", na=False)
+            has_taishaku_info = True
+        else:
+            t_files = [f for f in all_files if f.lower().startswith("taishaku")]
+            if t_files:
+                tf = t_files[0]
+                t_df = pd.read_csv(tf) if tf.endswith(".csv") else pd.read_excel(tf)
+                t_df.columns = t_df.columns.str.strip()
+                code_col = "コード" if "コード" in t_df.columns else t_df.columns[0]
+                taishaku_codes = set(t_df[code_col].astype(str).str.strip().str.replace(".0", "", regex=False))
+                df["is_taishaku"] = df["コード"].isin(taishaku_codes)
+                has_taishaku_info = True
+            else:
+                df["is_taishaku"] = False
+
+        return df[cols + ["is_taishaku"]], has_taishaku_info
     except Exception as e:
         st.error(f"ファイル（{target_file}）の読み込みに失敗しました: {e}")
-        return pd.DataFrame()
+        return pd.DataFrame(), False
 
 # 東証の制限値幅テーブル
 def get_price_limit(base_price):
@@ -54,9 +82,9 @@ def get_price_limit(base_price):
             return limit
     return 10000000
 
-jpx_df = get_jpx_tickers()
+jpx_df, has_taishaku_info = get_jpx_tickers()
 
-with st.expander("⚙️ スクリーニング条件・対象市場", expanded=True):
+with st.expander("⚙️ スクリーニング条件・対象市場（上昇・下落を同時抽出）", expanded=True):
     col1, col2 = st.columns(2)
     with col1:
         market_option = st.selectbox(
@@ -69,42 +97,77 @@ with st.expander("⚙️ スクリーニング条件・対象市場", expanded=T
                 "ETF・REIT含む全上場銘柄"
             ]
         )
-    with col2:
-        direction = st.selectbox("⑥ モード切替", ["上昇パターン (+)", "下落パターン (-)"])
-        min_turn_oku = st.number_input("⑦ 1日前売買代金 (億円以上)", min_value=0.0, value=5.0, step=1.0)
+        taishaku_option = st.selectbox(
+            "信用・貸借区分",
+            ["すべて（指定なし）", "貸借銘柄のみ", "貸借銘柄以外（制度信用・一般のみ）"]
+        )
+        if taishaku_option != "すべて（指定なし）" and not has_taishaku_info:
+            st.warning("⚠️ Excel内に『貸借区分』列がないか、`taishaku.csv` が見つからないため絞り込みが機能しません。")
 
-    is_up = "上昇" in direction
-    sign = "+" if is_up else "-"
-    s_label = "S高" if is_up else "S安"
-    gap_label = "GDスタート＆前日比" if is_up else "GUスタート＆前日比"
+    with col2:
+        min_turn1_oku = st.number_input("⑦ 1日前売買代金 (億円以上)", min_value=0.0, value=5.0, step=1.0)
+        min_turn0_oku = st.number_input("⑧ 当日売買代金 (億円以上 / 0で制限なし)", min_value=0.0, value=0.0, step=1.0)
 
     st.markdown("---")
+    
+    # 一括チェック操作ボタン
+    btn_col1, btn_col2, _ = st.columns([1, 1, 2])
+    with btn_col1:
+        if st.button("☑️ ①〜⑤をすべて選択", use_container_width=True):
+            for k in ["c1", "c2", "c3", "c4", "c5"]:
+                st.session_state[k] = True
+            st.rerun()
+    with btn_col2:
+        if st.button("⬜ ①〜⑤をすべて解除", use_container_width=True):
+            for k in ["c1", "c2", "c3", "c4", "c5"]:
+                st.session_state[k] = False
+            st.rerun()
+
     st.markdown("**判定条件：『グループA（いずれか1つ）』 かつ 『グループB（いずれか1つ）』**")
     
     g_col1, g_col2 = st.columns(2)
     with g_col1:
-        st.info("🅰️ **グループA（1日前の動き：OR条件）**")
+        group_a_day = st.radio(
+            "🅰️ グループAの対象日",
+            ["1日前（前日）", "当日（本日）"],
+            horizontal=True
+        )
+        is_a_today = (group_a_day == "当日（本日）")
         
-        c1_chk = st.checkbox(f"① 2日前引け比 1日前 ({sign}%以上)", value=True)
+        if is_a_today:
+            st.info("🅰️ **グループA（当日の動き：OR条件）**")
+            c1_label = "① 1日前引け比 当日 (±%以上)"
+            c2_label = "② 当日 寄り比 (±%以上)"
+            c3_label = "③ 当日 S高 / S安"
+        else:
+            st.info("🅰️ **グループA（1日前の動き：OR条件）**")
+            c1_label = "① 2日前引け比 1日前 (±%以上)"
+            c2_label = "② 1日前 寄り比 (±%以上)"
+            c3_label = "③ 1日前 S高 / S安"
+
+        c1_chk = st.checkbox(c1_label, key="c1")
         pct1_input = st.number_input("①の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=10.0, step=0.5, key="pct1")
         
-        st.write("") # 余白
-        c2_chk = st.checkbox(f"② 1日前 寄り比 ({sign}%以上)", value=True)
+        st.write("")
+        c2_chk = st.checkbox(c2_label, key="c2")
         pct2_input = st.number_input("②の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=10.0, step=0.5, key="pct2")
         
-        st.write("") # 余白
-        c3_chk = st.checkbox(f"③ 1日前 {s_label}", value=True)
+        st.write("")
+        c3_chk = st.checkbox(c3_label, key="c3")
 
     with g_col2:
+        st.write("") # ラジオボタン分の高さ調整
+        st.write("")
         st.success("🅱️ **グループB（当日の動き：OR条件）**")
         
-        c4_chk = st.checkbox(f"④ 当日 寄り比 ({sign}%以上)", value=True)
+        c4_chk = st.checkbox("④ 当日 寄り比 (±%以上)", key="c4")
         pct4_input = st.number_input("④の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct4")
         
-        st.write("") # 余白
-        c5_chk = st.checkbox(f"⑤ 当日 {gap_label} ({sign}%以上)", value=True)
+        st.write("")
+        c5_chk = st.checkbox("⑤ 当日 GD反発 / GU失速 (±%以上)", key="c5")
         pct5_input = st.number_input("⑤の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct5")
 
+# 対象銘柄の絞り込み
 target_df = pd.DataFrame()
 if not jpx_df.empty:
     m_col = "市場・商品区分"
@@ -118,33 +181,39 @@ if not jpx_df.empty:
         target_df = jpx_df[jpx_df[m_col].str.contains("グロース", na=False)]
     else:
         target_df = jpx_df
+
+    if has_taishaku_info:
+        if taishaku_option == "貸借銘柄のみ":
+            target_df = target_df[target_df["is_taishaku"] == True]
+        elif taishaku_option == "貸借銘柄以外（制度信用・一般のみ）":
+            target_df = target_df[target_df["is_taishaku"] == False]
+
     st.caption(f"現在のスキャン対象：{len(target_df):,} 銘柄")
 
-if st.button("🚀 東証全銘柄から一括スクリーニング開始", type="primary", use_container_width=True):
+if st.button("🚀 東証全銘柄から一括スクリーニング開始（上昇・下落同時）", type="primary", use_container_width=True):
     if target_df.empty:
         st.warning("対象銘柄が0件です。")
         st.stop()
 
     flags_a = [c1_chk, c2_chk, c3_chk]
     flags_b = [c4_chk, c5_chk]
-
-    if not any(flags_a) or not any(flags_b):
-        st.warning("グループA（①〜③）とグループB（④〜⑤）のそれぞれで、最低1つ以上の条件にチェックを入れてください。")
-        st.stop()
+    use_a = any(flags_a)
+    use_b = any(flags_b)
 
     code_to_name = dict(zip(target_df["コード"], target_df["銘柄名"]))
     code_to_market = dict(zip(target_df["コード"], target_df["市場・商品区分"]))
+    code_to_taishaku = dict(zip(target_df["コード"], target_df["is_taishaku"]))
     codes = target_df["コード"].tolist()
     
-    # 個別の騰落率を小数に変換
     pct1 = pct1_input / 100.0
     pct2 = pct2_input / 100.0
     pct4 = pct4_input / 100.0
     pct5 = pct5_input / 100.0
     
-    min_turnover = min_turn_oku * 100_000_000
-    is_up = "上昇" in direction
-    hits = []
+    min_turnover1 = min_turn1_oku * 100_000_000
+    min_turnover0 = min_turn0_oku * 100_000_000
+    hits_up = []
+    hits_down = []
     
     batch_size = 50
     total_batches = (len(codes) + batch_size - 1) // batch_size
@@ -184,74 +253,16 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
                 v1 = float(df["Volume"].iloc[-2])
                 o0 = float(df["Open"].iloc[-1])
                 c0 = float(df["Close"].iloc[-1])
+                v0 = float(df["Volume"].iloc[-1])
 
-                # ⑦ 1日前売買代金フィルター
+                # 売買代金フィルター（⑦ 1日前 / ⑧ 当日）
                 turn1 = c1 * v1
-                if turn1 < min_turnover:
+                turn0 = c0 * v0
+                if turn1 < min_turnover1 or turn0 < min_turnover0:
                     continue
 
-                limit1 = get_price_limit(c2)
-
-                if is_up:
-                    res_a = [
-                        (c1 - c2) / c2 >= pct1,
-                        (c1 - o1) / o1 >= pct2,
-                        c1 >= c2 + limit1
-                    ]
-                    names_a = [f"①2日前比({pct1_input}%)", f"②1日前寄り比({pct2_input}%)", "③S高"]
-
-                    res_b = [
-                        (c0 - o0) / o0 >= pct4,
-                        (o0 < c1) and ((c0 - c1) / c1 >= pct5)
-                    ]
-                    names_b = [f"④当日寄り比({pct4_input}%)", f"⑤GD反発({pct5_input}%)"]
-                else:
-                    res_a = [
-                        (c1 - c2) / c2 <= -pct1,
-                        (c1 - o1) / o1 <= -pct2,
-                        c1 <= c2 - limit1
-                    ]
-                    names_a = [f"①2日前比(-{pct1_input}%)", f"②1日前寄り比(-{pct2_input}%)", "③S安"]
-
-                    res_b = [
-                        (c0 - o0) / o0 <= -pct4,
-                        (o0 > c1) and ((c0 - c1) / c1 <= -pct5)
-                    ]
-                    names_b = [f"④当日寄り比(-{pct4_input}%)", f"⑤GU失速(-{pct5_input}%)"]
-
-                # グループA（OR）とグループB（OR）の評価
-                eval_a = [r for r, flag in zip(res_a, flags_a) if flag]
-                eval_b = [r for r, flag in zip(res_b, flags_b) if flag]
-
-                # AとBを両方満たす（AND）場合のみ抽出
-                if any(eval_a) and any(eval_b):
-                    hit_tags_a = [n for r, flag, n in zip(res_a, flags_a, names_a) if r and flag]
-                    hit_tags_b = [n for r, flag, n in zip(res_b, flags_b, names_b) if r and flag]
-                    market_short = code_to_market.get(code, "").replace("（内国株式）", "")
-                    
-                    hits.append({
-                        "コード": code,
-                        "銘柄名": code_to_name.get(code, ""),
-                        "市場": market_short,
-                        "2日前終値": f"{c2:,.0f}",
-                        "1日前終値": f"{c1:,.0f} ({(c1-c2)/c2*100:+.1f}%)",
-                        "1日前売買代金": f"{turn1/100_000_000:.1f}億円",
-                        "当日始値": f"{o0:,.0f}",
-                        "当日現在値": f"{c0:,.0f} ({(c0-c1)/c1*100:+.1f}%)",
-                        "該当条件(A)": " / ".join(hit_tags_a),
-                        "該当条件(B)": " / ".join(hit_tags_b)
-                    })
-            except Exception:
-                continue
-
-        progress_bar.progress((b_idx + 1) / total_batches)
-        time.sleep(0.1)
-
-    status_text.empty()
-    progress_bar.empty()
-
-    st.subheader(f"抽出結果: {len(hits)} 件")
-    if hits:
-        st.dataframe(pd.DataFrame(hits), use_container_width=True, hide_index=True)
-    else:
-        st.info("条件に一致する銘柄はありませんでした。数値を緩めて再実行してください。")
+                # グループAの基準価格・対象価格の切り替え
+                if is_a_today:
+                    base_c_a = c1   # 前日終値
+                    open_a = o0     # 当日始値
+                    close_a = c0    # 当日現在値
