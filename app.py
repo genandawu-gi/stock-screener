@@ -14,7 +14,7 @@ def get_jpx_tickers():
     if not files:
         st.warning("GitHubにExcelまたはCSVファイルが見つかりません。")
         return pd.DataFrame()
-    target_file = files[0]
+    target_file = files
     try:
         if target_file.endswith(".csv"):
             df = pd.read_csv(target_file)
@@ -83,25 +83,43 @@ with st.expander("⚙️ スクリーニング条件・対象市場", expanded=T
     
     g_col1, g_col2 = st.columns(2)
     with g_col1:
-        st.info("🅰️ **グループA（1日前の動き：OR条件）**")
+        group_a_day = st.radio(
+            "🅰️ グループAの対象日",
+            ["1日前（前日）", "当日（本日）"],
+            horizontal=True
+        )
+        is_a_today = (group_a_day == "当日（本日）")
+
+        if is_a_today:
+            st.info("🅰️ **グループA（当日の動き：OR条件）**")
+            c1_label = f"① 1日前引け比 当日 ({sign}%以上)"
+            c2_label = f"② 当日 寄り比 ({sign}%以上)"
+            c3_label = f"③ 当日 {s_label}"
+        else:
+            st.info("🅰️ **グループA（1日前の動き：OR条件）**")
+            c1_label = f"① 2日前引け比 1日前 ({sign}%以上)"
+            c2_label = f"② 1日前 寄り比 ({sign}%以上)"
+            c3_label = f"③ 1日前 {s_label}"
         
-        c1_chk = st.checkbox(f"① 2日前引け比 1日前 ({sign}%以上)", value=True)
+        c1_chk = st.checkbox(c1_label, value=True)
         pct1_input = st.number_input("①の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=10.0, step=0.5, key="pct1")
         
-        st.write("") # 余白
-        c2_chk = st.checkbox(f"② 1日前 寄り比 ({sign}%以上)", value=True)
+        st.write("")
+        c2_chk = st.checkbox(c2_label, value=True)
         pct2_input = st.number_input("②の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=10.0, step=0.5, key="pct2")
         
-        st.write("") # 余白
-        c3_chk = st.checkbox(f"③ 1日前 {s_label}", value=True)
+        st.write("")
+        c3_chk = st.checkbox(c3_label, value=True)
 
     with g_col2:
+        st.write("")
+        st.write("")
         st.success("🅱️ **グループB（当日の動き：OR条件）**")
         
         c4_chk = st.checkbox(f"④ 当日 寄り比 ({sign}%以上)", value=True)
         pct4_input = st.number_input("④の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct4")
         
-        st.write("") # 余白
+        st.write("")
         c5_chk = st.checkbox(f"⑤ 当日 {gap_label} ({sign}%以上)", value=True)
         pct5_input = st.number_input("⑤の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct5")
 
@@ -167,7 +185,7 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
                 if len(batch_codes) == 1:
                     df = data.dropna(how="all")
                 else:
-                    if ticker_str not in data.columns.levels[0]:
+                    if ticker_str not in data.columns.levels:
                         continue
                     df = data[ticker_str].dropna(how="all")
 
@@ -190,15 +208,29 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
                 if turn1 < min_turnover:
                     continue
 
-                limit1 = get_price_limit(c2)
+                # グループAの基準価格・対象価格を切り替え
+                if is_a_today:
+                    base_c_a = c1   # 前日終値
+                    open_a = o0     # 当日始値
+                    close_a = c0    # 当日現在値
+                    day_tag = "当日"
+                    prev_tag = "1日前比"
+                else:
+                    base_c_a = c2   # 2日前終値
+                    open_a = o1     # 1日前始値
+                    close_a = c1    # 1日前終値
+                    day_tag = "1日前"
+                    prev_tag = "2日前比"
+
+                limit_a = get_price_limit(base_c_a)
 
                 if is_up:
                     res_a = [
-                        (c1 - c2) / c2 >= pct1,
-                        (c1 - o1) / o1 >= pct2,
-                        c1 >= c2 + limit1
+                        (close_a - base_c_a) / base_c_a >= pct1,
+                        (close_a - open_a) / open_a >= pct2,
+                        close_a >= base_c_a + limit_a
                     ]
-                    names_a = [f"①2日前比({pct1_input}%)", f"②1日前寄り比({pct2_input}%)", "③S高"]
+                    names_a = [f"①{prev_tag}({pct1_input}%)", f"②{day_tag}寄り比({pct2_input}%)", f"③{day_tag}S高"]
 
                     res_b = [
                         (c0 - o0) / o0 >= pct4,
@@ -207,11 +239,11 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
                     names_b = [f"④当日寄り比({pct4_input}%)", f"⑤GD反発({pct5_input}%)"]
                 else:
                     res_a = [
-                        (c1 - c2) / c2 <= -pct1,
-                        (c1 - o1) / o1 <= -pct2,
-                        c1 <= c2 - limit1
+                        (close_a - base_c_a) / base_c_a <= -pct1,
+                        (close_a - open_a) / open_a <= -pct2,
+                        close_a <= base_c_a - limit_a
                     ]
-                    names_a = [f"①2日前比(-{pct1_input}%)", f"②1日前寄り比(-{pct2_input}%)", "③S安"]
+                    names_a = [f"①{prev_tag}(-{pct1_input}%)", f"②{day_tag}寄り比(-{pct2_input}%)", f"③{day_tag}S安"]
 
                     res_b = [
                         (c0 - o0) / o0 <= -pct4,
@@ -223,7 +255,6 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
                 eval_a = [r for r, flag in zip(res_a, flags_a) if flag]
                 eval_b = [r for r, flag in zip(res_b, flags_b) if flag]
 
-                # AとBを両方満たす（AND）場合のみ抽出
                 if any(eval_a) and any(eval_b):
                     hit_tags_a = [n for r, flag, n in zip(res_a, flags_a, names_a) if r and flag]
                     hit_tags_b = [n for r, flag, n in zip(res_b, flags_b, names_b) if r and flag]
@@ -232,26 +263,3 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
                     hits.append({
                         "コード": code,
                         "銘柄名": code_to_name.get(code, ""),
-                        "市場": market_short,
-                        "2日前終値": f"{c2:,.0f}",
-                        "1日前終値": f"{c1:,.0f} ({(c1-c2)/c2*100:+.1f}%)",
-                        "1日前売買代金": f"{turn1/100_000_000:.1f}億円",
-                        "当日始値": f"{o0:,.0f}",
-                        "当日現在値": f"{c0:,.0f} ({(c0-c1)/c1*100:+.1f}%)",
-                        "該当条件(A)": " / ".join(hit_tags_a),
-                        "該当条件(B)": " / ".join(hit_tags_b)
-                    })
-            except Exception:
-                continue
-
-        progress_bar.progress((b_idx + 1) / total_batches)
-        time.sleep(0.1)
-
-    status_text.empty()
-    progress_bar.empty()
-
-    st.subheader(f"抽出結果: {len(hits)} 件")
-    if hits:
-        st.dataframe(pd.DataFrame(hits), use_container_width=True, hide_index=True)
-    else:
-        st.info("条件に一致する銘柄はありませんでした。数値を緩めて再実行してください。")
