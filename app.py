@@ -7,19 +7,19 @@ import time
 st.set_page_config(page_title="東証全銘柄スクリーナー", layout="wide")
 st.title("📱 東証全銘柄カスタムスクリーナー")
 
-# GitHubリポジトリ内に置いた東証上場銘柄一覧（data_j.xls）を読み込む
+# GitHubリポジトリ内に置いた東証上場銘柄一覧（data_j.xlsx）を読み込む
 @st.cache_data
 def get_jpx_tickers():
     if os.path.exists("data_j.xlsx"):
         try:
-            df = pd.read_excel("data_j.xls", engine="xlrd")
+            df = pd.read_excel("data_j.xlsx", engine="xlrd")
             df["コード"] = df["コード"].astype(str).str.strip()
             return df[["コード", "銘柄名", "市場・商品区分"]]
         except Exception as e:
-            st.error(f"data_j.xls の読み込みに失敗しました: {e}")
+            st.error(f"data_j.xlsx の読み込みに失敗しました: {e}")
             return pd.DataFrame()
     else:
-        st.warning("GitHubに data_j.xls がアップロードされていません。")
+        st.warning("GitHubに data_j.xlsx がアップロードされていません。")
         return pd.DataFrame()
 
 # 東証の制限値幅テーブル
