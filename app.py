@@ -1,6 +1,8 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
+import requests
+import io
 import time
 
 st.set_page_config(page_title="東証全銘柄スクリーナー", layout="wide")
@@ -10,9 +12,11 @@ st.title("📱 東証全銘柄カスタムスクリーナー")
 @st.cache_data(ttl=86400)
 def get_jpx_tickers():
     url = "https://jpx.co.jp"
+    headers = {"User-Agent": "Mozilla/5.0"}
     try:
-        df = pd.read_excel(url)
-        # 4桁の数字コード（普通株式等）を中心に整形
+        res = requests.get(url, headers=headers, timeout=15)
+        res.raise_for_status()
+        df = pd.read_excel(io.BytesIO(res.content), engine="xlrd")
         df["コード"] = df["コード"].astype(str).str.strip()
         return df[["コード", "銘柄名", "市場・商品区分"]]
     except Exception as e:
@@ -37,23 +41,7 @@ def get_price_limit(base_price):
             return limit
     return 10000000
 
-jpx_df = import requests
-import io
-
-@st.cache_data(ttl=86400)
-def get_jpx_tickers():
-    url = "https://jpx.co.jp"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    try:
-        res = requests.get(url, headers=headers, timeout=15)
-        res.raise_for_status()
-        df = pd.read_excel(io.BytesIO(res.content), engine="xlrd")
-        df["コード"] = df["コード"].astype(str).str.strip()
-        return df[["コード", "銘柄名", "市場・商品区分"]]
-    except Exception as e:
-        st.error(f"JPX銘柄一覧の取得に失敗しました: {e}")
-        return pd.DataFrame()
-()
+jpx_df = get_jpx_tickers()
 
 # --- スマホで見やすい設定メニュー ---
 with st.expander("⚙️ スクリーニング条件・対象市場", expanded=True):
@@ -87,6 +75,7 @@ with st.expander("⚙️ スクリーニング条件・対象市場", expanded=T
     c5_chk = st.checkbox(f"⑤ 当日 {gap_label} {sign}{pct_input}%以上", value=True)
 
 # 対象銘柄の絞り込み
+target_df = pd.DataFrame()
 if not jpx_df.empty:
     if market_option == "東証全株式（プライム・スタンダード・グロース）":
         target_df = jpx_df[jpx_df["市場・商品区分"].str.contains("プライム|スタンダード|グロース", na=False)]
@@ -102,7 +91,8 @@ if not jpx_df.empty:
     st.caption(f"現在のスキャン対象：{len(target_df):,} 銘柄")
 
 if st.button("🚀 東証全銘柄から一括スクリーニング開始", type="primary", use_container_width=True):
-    if jpx_df.empty:
+    if target_df.empty:
+        st.warning("銘柄一覧が取得できていないため実行できません。")
         st.stop()
 
     code_to_name = dict(zip(target_df["コード"], target_df["銘柄名"]))
@@ -115,7 +105,7 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
     active_flags = [c1_chk, c2_chk, c3_chk, c4_chk, c5_chk]
 
     hits = []
-    batch_size = 200  # 200銘柄ずつ分割取得
+    batch_size = 200
     total_batches = (len(codes) + batch_size - 1) // batch_size
     progress_bar = st.progress(0)
     status_text = st.empty()
