@@ -127,37 +127,19 @@ with st.expander("⚙️ スクリーニング条件・対象市場（上昇・�
     
     g_col1, g_col2 = st.columns(2)
     with g_col1:
-        group_a_day = st.radio(
-            "🅰️ グループAの対象日",
-            ["1日前（前日）", "当日（本日）"],
-            horizontal=True
-        )
-        is_a_today = (group_a_day == "当日（本日）")
+        st.info("🅰️ **グループA（1日前の動き：OR条件）**")
         
-        if is_a_today:
-            st.info("🅰️ **グループA（当日の動き：OR条件）**")
-            c1_label = "① 1日前引け比 当日 (±%以上)"
-            c2_label = "② 当日 寄り比 (±%以上)"
-            c3_label = "③ 当日 S高 / S安"
-        else:
-            st.info("🅰️ **グループA（1日前の動き：OR条件）**")
-            c1_label = "① 2日前引け比 1日前 (±%以上)"
-            c2_label = "② 1日前 寄り比 (±%以上)"
-            c3_label = "③ 1日前 S高 / S安"
-
-        c1_chk = st.checkbox(c1_label, key="c1")
+        c1_chk = st.checkbox("① 2日前引け比 1日前 (±%以上)", key="c1")
         pct1_input = st.number_input("①の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=10.0, step=0.5, key="pct1")
         
         st.write("")
-        c2_chk = st.checkbox(c2_label, key="c2")
+        c2_chk = st.checkbox("② 1日前 寄り比 (±%以上)", key="c2")
         pct2_input = st.number_input("②の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=10.0, step=0.5, key="pct2")
         
         st.write("")
-        c3_chk = st.checkbox(c3_label, key="c3")
+        c3_chk = st.checkbox("③ 1日前 S高 / S安", key="c3")
 
     with g_col2:
-        st.write("") # ラジオボタン分の高さ調整
-        st.write("")
         st.success("🅱️ **グループB（当日の動き：OR条件）**")
         
         c4_chk = st.checkbox("④ 当日 寄り比 (±%以上)", key="c4")
@@ -261,8 +243,19 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始（上�
                 if turn1 < min_turnover1 or turn0 < min_turnover0:
                     continue
 
-                # グループAの基準価格・対象価格の切り替え
-                if is_a_today:
-                    base_c_a = c1   # 前日終値
-                    open_a = o0     # 当日始値
-                    close_a = c0    # 当日現在値
+                limit1 = get_price_limit(c2)
+                market_short = code_to_market.get(code, "").replace("（内国株式）", "")
+                taishaku_label = "貸借" if code_to_taishaku.get(code) else "-"
+
+                def build_row(tags_a, tags_b):
+                    row = {
+                        "コード": code,
+                        "銘柄名": code_to_name.get(code, ""),
+                        "市場": market_short,
+                    }
+                    if has_taishaku_info:
+                        row["区分"] = taishaku_label
+                    row.update({
+                        "2日前終値": f"{c2:,.0f}",
+                        "1日前終値": f"{c1:,.0f} ({(c1-c2)/c2*100:+.1f}%)",
+                        "1日前売買代金": f"{turn1/100_000_000:.1f}億円",
