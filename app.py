@@ -3,9 +3,11 @@ import yfinance as yf
 import pandas as pd
 import glob
 import time
+from datetime import datetime
+import pytz
 
 st.set_page_config(page_title="東証全銘柄スクリーナー", layout="wide")
-st.title("📱 東証全銘柄カスタムスクリーナー")
+st.title("📱 東証全銘柄カスタムスクリーナー（ザラ場対応版）")
 
 # GitHubリポジトリ内のExcel/CSVファイルを自動検索して読み込む
 @st.cache_data
@@ -70,7 +72,7 @@ with st.expander("⚙️ スクリーニング条件・対象市場", expanded=T
         )
     with col2:
         direction = st.selectbox("モード切替", ["上昇パターン (+)", "下落パターン (-)"])
-        min_turn_oku = st.number_input("1日前売買代金 (億円以上)", min_value=0.0, value=5.0, step=1.0)
+        min_turn_oku = st.number_input("1日前売買代金 (億円以上)", min_value=0.0, value=0.0, step=1.0)
         
     is_up = "上昇" in direction
     sign = "+" if is_up else "-"
@@ -79,28 +81,28 @@ with st.expander("⚙️ スクリーニング条件・対象市場", expanded=T
     
     st.markdown("---")
     st.markdown("**判定条件： グループA（いずれか1つ） かつ グループB（いずれか1つ）**")
+    st.caption("※片方のグループをすべてチェック外しにすると、もう片方のグループのみで検索します。")
     
     g_col1, g_col2 = st.columns(2)
     with g_col1:
         st.info("🅰️ **グループA（1日前の動き：OR条件）**")
-        c1_chk = st.checkbox(f"① 2日前引け比 1日前 ({sign}%以上)", value=True)
+        c1_chk = st.checkbox(f"① 2日前引け比 1日前 ({sign}%以上)", value=False)
         pct1_input = st.number_input("①の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct1")
         st.write("")
-        c2_chk = st.checkbox(f"② 1日前 寄り比 ({sign}%以上)", value=True)
+        c2_chk = st.checkbox(f"② 1日前 寄り比 ({sign}%以上)", value=False)
         pct2_input = st.number_input("②の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct2")
         st.write("")
-        c3_chk = st.checkbox(f"③ 1日前 {s_label}", value=True)
+        c3_chk = st.checkbox(f"③ 1日前 {s_label}", value=False)
         
     with g_col2:
         st.success("🅱️ **グループB（当日の動き：OR条件）**")
-        c4_chk = st.checkbox(f"④ 当日 寄り比 ({sign}%以上)", value=True)
+        c4_chk = st.checkbox(f"④ 当日 寄り比 ({sign}%以上)", value=False)
         pct4_input = st.number_input("④の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct4")
         st.write("")
-        c5_chk = st.checkbox(f"⑤ 当日 {gap_label} ({sign}%以上)", value=True)
+        c5_chk = st.checkbox(f"⑤ 当日 {gap_label} ({sign}%以上)", value=False)
         pct5_input = st.number_input("⑤の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct5")
         st.write("")
-        # ★追加箇所：グループBに当日ストップ条件を追加
-        c6_chk = st.checkbox(f"⑥ 当日 {s_label}", value=True)
+        c6_chk = st.checkbox(f"⑥ 当日 {s_label}（一時到達・寄らず含む）", value=True)
 
 target_df = pd.DataFrame()
 if not jpx_df.empty:
@@ -124,7 +126,6 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
         st.stop()
         
     flags_a = [c1_chk, c2_chk, c3_chk]
-    # ★変更箇所：flags_b に c6_chk を追加
     flags_b = [c4_chk, c5_chk, c6_chk]
     
     use_a = any(flags_a)
@@ -134,7 +135,6 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
     code_to_market = dict(zip(target_df["コード"], target_df["市場・商品区分"]))
     codes = target_df["コード"].tolist()
     
-    # 個別の騰落率を小数に変換
     pct1 = pct1_input / 100.0
     pct2 = pct2_input / 100.0
     pct4 = pct4_input / 100.0
@@ -142,6 +142,10 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
     
     min_turnover = min_turn_oku * 100_000_000
     is_up = "上昇" in direction
+    
+    # 日本時間の「今日の日付」を取得
+    jst = pytz.timezone("Asia/Tokyo")
+    today_date = datetime.now(jst).date()
     
     hits = []
     batch_size = 50
@@ -155,7 +159,8 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
         status_text.text(f"株価データ取得中... ({min((b_idx + 1) * batch_size, len(codes)):,} / {len(codes):,} 銘柄)")
         
         try:
-            data = yf.download(yf_tickers, period="5d", group_by="ticker", progress=False, threads=True)
+            # 取引時間中の最新データを確実に取るため interval="1d" で直近5日取得
+            data = yf.download(yf_tickers, period="5d", interval="1d", group_by="ticker", progress=False, threads=True)
         except Exception:
             continue
             
@@ -163,85 +168,77 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
             ticker_str = f"{code}.T"
             try:
                 if len(batch_codes) == 1:
-                    df = data.dropna(how="all")
+                    df = data.copy()
                 else:
                     if ticker_str not in data.columns.levels[0]:
                         continue
-                    df = data[ticker_str].dropna(how="all")
-                    
+                    df = data[ticker_str].copy()
+                
+                # Closeが完全にNaNの行だけ除外（寄らずでもCloseに気配/基準値が入る場合を残す）
+                df = df.dropna(subset=["Close"])
                 if len(df) < 3:
                     continue
-                    
-                req_cols = ["Open", "Close", "Volume"]
-                if not all(col in df.columns for col in req_cols):
+                
+                # 最新行の日付を確認（ザラ場中に今日の行がまだ作られていない銘柄のズレを防止）
+                last_row_date = pd.to_datetime(df.index[-1]).date()
+                
+                # もし当日の条件（グループB）を使っているのに、最新データが今日でない場合はスキップ
+                if use_b and last_row_date != today_date:
                     continue
-                    
+                
                 c2 = float(df["Close"].iloc[-3])
-                o1 = float(df["Open"].iloc[-2])
                 c1 = float(df["Close"].iloc[-2])
-                v1 = float(df["Volume"].iloc[-2])
-                o0 = float(df["Open"].iloc[-1])
                 c0 = float(df["Close"].iloc[-1])
+                
+                # Open/High/LowがNaN（ザラ場中でまだ約定していない「寄らず」状態）の場合はc0で補完
+                o1 = float(df["Open"].iloc[-2]) if pd.notna(df["Open"].iloc[-2]) else c1
+                v1 = float(df["Volume"].iloc[-2]) if pd.notna(df["Volume"].iloc[-2]) else 0.0
+                
+                o0 = float(df["Open"].iloc[-1]) if pd.notna(df["Open"].iloc[-1]) else c0
+                h0 = float(df["High"].iloc[-1]) if pd.notna(df["High"].iloc[-1]) else c0
+                l0 = float(df["Low"].iloc[-1]) if pd.notna(df["Low"].iloc[-1]) else c0
+                v0 = float(df["Volume"].iloc[-1]) if pd.notna(df["Volume"].iloc[-1]) else 0.0
                 
                 # 1日前売買代金フィルター
                 turn1 = c1 * v1
                 if turn1 < min_turnover:
                     continue
                     
-                limit1 = get_price_limit(c2) # 1日前の値幅制限
-                limit0 = get_price_limit(c1) # ★追加：当日の値幅制限（基準は1日前終値c1）
+                limit1 = get_price_limit(c2)
+                limit0 = get_price_limit(c1)
                 
                 if is_up:
                     res_a = [
                         (c1 - c2) / c2 >= pct1,
                         (c1 - o1) / o1 >= pct2,
-                        c1 >= c2 + limit1
+                        c1 >= c2 + limit1 - 0.1
                     ]
                     names_a = [f"①2日前比({pct1_input}%)", f"②1日前寄り比({pct2_input}%)", "③S高"]
                     
-                    # ★変更箇所：res_b と names_b に当日S高判定を追加
                     res_b = [
                         (c0 - o0) / o0 >= pct4,
                         (o0 < c1) and ((c0 - c1) / c1 >= pct5),
-                        c0 >= c1 + limit0
+                        (h0 >= c1 + limit0 - 0.1) or (c0 >= c1 + limit0 - 0.1)
                     ]
                     names_b = [f"④当日寄り比({pct4_input}%)", f"⑤GD反発({pct5_input}%)", "⑥当日S高"]
                 else:
                     res_a = [
                         (c1 - c2) / c2 <= -pct1,
                         (c1 - o1) / o1 <= -pct2,
-                        c1 <= c2 - limit1
+                        c1 <= c2 - limit1 + 0.1
                     ]
                     names_a = [f"①2日前比(-{pct1_input}%)", f"②1日前寄り比(-{pct2_input}%)", "③S安"]
                     
-                    # ★変更箇所：res_b と names_b に当日S安判定を追加
                     res_b = [
                         (c0 - o0) / o0 <= -pct4,
                         (o0 > c1) and ((c0 - c1) / c1 <= -pct5),
-                        c0 <= c1 - limit0
+                        (l0 <= c1 - limit0 + 0.1) or (c0 <= c1 - limit0 + 0.1)
                     ]
                     names_b = [f"④当日寄り比(-{pct4_input}%)", f"⑤GU失速(-{pct5_input}%)", "⑥当日S安"]
                     
-                # グループA（OR）とグループB（OR）の評価（チェックがないグループはTrue扱い）
                 match_a = any(r for r, flag in zip(res_a, flags_a) if flag) if use_a else True
                 match_b = any(r for r, flag in zip(res_b, flags_b) if flag) if use_b else True
                 
                 if match_a and match_b:
                     hit_tags_a = [n for r, flag, n in zip(res_a, flags_a, names_a) if r and flag]
                     hit_tags_b = [n for r, flag, n in zip(res_b, flags_b, names_b) if r and flag]
-                    market_short = code_to_market.get(code, "").replace("（内国株式）", "")
-                    
-                    hits.append({
-                        "コード": code,
-                        "銘柄名": code_to_name.get(code, ""),
-                        "市場": market_short,
-                        "2日前終値": f"{c2:,.0f}",
-                        "1日前終値": f"{c1:,.0f} ({(c1-c2)/c2*100:+.1f}%)",
-                        "1日前売買代金": f"{turn1/100_000_000:.1f}億円",
-                        "当日始値": f"{o0:,.0f}",
-                        "当日現在値": f"{c0:,.0f} ({(c0-c1)/c1*100:+.1f}%)",
-                        "該当条件(A)": " / ".join(hit_tags_a) if hit_tags_a else "指定なし",
-                        "該当条件(B)": " / ".join(hit_tags_b) if hit_tags_b else "指定なし"
-                    })
-            except Exception:
-                continue
