@@ -116,6 +116,7 @@ with st.expander("⚙️ スクリーニング条件・対象市場", expanded=T
         st.write("")
         c8_chk = st.checkbox(f"⑧ 1日前 {s_label}", value=False)
 
+
 target_df = pd.DataFrame()
 if not jpx_df.empty:
     m_col = "市場・商品区分"
@@ -145,13 +146,9 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
     code_to_market = dict(zip(target_df["コード"], target_df["市場・商品区分"]))
     codes = target_df["コード"].tolist()
     
-    # 個別の騰落率を小数に変換
-    pct1 = pct1_input / 100.0
-    pct2 = pct2_input / 100.0
-    pct4 = pct4_input / 100.0
-    pct5 = pct5_input / 100.0
-    pct6 = pct6_input / 100.0
-    pct7 = pct7_input / 100.0
+    pct1, pct2 = pct1_input / 100.0, pct2_input / 100.0
+    pct4, pct5 = pct4_input / 100.0, pct5_input / 100.0
+    pct6, pct7 = pct6_input / 100.0, pct7_input / 100.0
     
     min_turnover = min_turn_oku * 100_000_000
     is_up = "上昇" in direction
@@ -170,7 +167,6 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
         try:
             data = yf.download(yf_tickers, period="5d", group_by="ticker", progress=False, threads=True)
         except Exception:
-            progress_bar.progress((b_idx + 1) / total_batches)
             continue
 
         for code in batch_codes:
@@ -183,21 +179,13 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
                         continue
                     df = data[ticker_str].dropna(how="all")
 
-                if len(df) < 3:
-                    continue
-
-                req_cols = ["Open", "Close", "Volume"]
-                if not all(col in df.columns for col in req_cols):
+                if len(df) < 3 or not all(c in df.columns for c in ["Open", "Close", "Volume"]):
                     continue
 
                 c2 = float(df["Close"].iloc[-3])
-                o1 = float(df["Open"].iloc[-2])
-                c1 = float(df["Close"].iloc[-2])
-                v1 = float(df["Volume"].iloc[-2])
-                o0 = float(df["Open"].iloc[-1])
-                c0 = float(df["Close"].iloc[-1])
+                o1, c1, v1 = float(df["Open"].iloc[-2]), float(df["Close"].iloc[-2]), float(df["Volume"].iloc[-2])
+                o0, c0 = float(df["Open"].iloc[-1]), float(df["Close"].iloc[-1])
 
-                # 1日前売買代金フィルター
                 turn1 = c1 * v1
                 if turn1 < min_turnover:
                     continue
@@ -205,13 +193,8 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
                 limit1 = get_price_limit(c2)
 
                 if is_up:
-                    res_a = [
-                        (c1 - c2) / c2 >= pct1,
-                        (c1 - o1) / o1 >= pct2,
-                        c1 >= c2 + limit1
-                    ]
+                    res_a = [(c1 - c2) / c2 >= pct1, (c1 - o1) / o1 >= pct2, c1 >= c2 + limit1]
                     names_a = [f"①2日前比({pct1_input}%)", f"②1日前寄り比({pct2_input}%)", "③S高"]
-
                     res_b = [
                         (c0 - o0) / o0 >= pct4,
                         (o0 < c1) and ((c0 - c1) / c1 >= pct5),
@@ -219,21 +202,10 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
                         (c1 - o1) / o1 >= pct7,
                         c1 >= c2 + limit1
                     ]
-                    names_b = [
-                        f"④当日寄り比({pct4_input}%)",
-                        f"⑤GD反発({pct5_input}%)",
-                        f"⑥2日前比({pct6_input}%)",
-                        f"⑦1日前寄り比({pct7_input}%)",
-                        "⑧1日前S高"
-                    ]
+                    names_b = [f"④当日寄り比({pct4_input}%)", f"⑤GD反発({pct5_input}%)", f"⑥2日前比({pct6_input}%)", f"⑦1日前寄り比({pct7_input}%)", "⑧1日前S高"]
                 else:
-                    res_a = [
-                        (c1 - c2) / c2 <= -pct1,
-                        (c1 - o1) / o1 <= -pct2,
-                        c1 <= c2 - limit1
-                    ]
+                    res_a = [(c1 - c2) / c2 <= -pct1, (c1 - o1) / o1 <= -pct2, c1 <= c2 - limit1]
                     names_a = [f"①2日前比(-{pct1_input}%)", f"②1日前寄り比(-{pct2_input}%)", "③S安"]
-
                     res_b = [
                         (c0 - o0) / o0 <= -pct4,
                         (o0 > c1) and ((c0 - c1) / c1 <= -pct5),
@@ -241,21 +213,33 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
                         (c1 - o1) / o1 <= -pct7,
                         c1 <= c2 - limit1
                     ]
-                    names_b = [
-                        f"④当日寄り比(-{pct4_input}%)",
-                        f"⑤GU失速(-{pct5_input}%)",
-                        f"⑥2日前比(-{pct6_input}%)",
-                        f"⑦1日前寄り比(-{pct7_input}%)",
-                        "⑧1日前S安"
-                    ]
+                    names_b = [f"④当日寄り比(-{pct4_input}%)", f"⑤GU失速(-{pct5_input}%)", f"⑥2日前比(-{pct6_input}%)", f"⑦1日前寄り比(-{pct7_input}%)", "⑧1日前S安"]
 
-                # グループA（OR）とグループB（OR）の評価（チェックがないグループはTrue扱い）
                 match_a = any(r for r, flag in zip(res_a, flags_a) if flag) if use_a else True
                 match_b = any(r for r, flag in zip(res_b, flags_b) if flag) if use_b else True
 
                 if match_a and match_b:
                     matched_a = [n for r, flag, n in zip(res_a, flags_a, names_a) if flag and r]
                     matched_b = [n for r, flag, n in zip(res_b, flags_b, names_b) if flag and r]
+                    hits.append(dict(
+                        コード=code, 銘柄名=code_to_name.get(code, ""), 市場=code_to_market.get(code, ""),
+                        前日終値=round(c1, 1), 前日比=round((c1 - c2) / c2 * 100, 2),
+                        売買代金億=round(turn1 / 100_000_000, 1), 当日終値=round(c0, 1),
+                        当日寄り比=round((c0 - o0) / o0 * 100, 2), 当日前日比=round((c0 - c1) / c1 * 100, 2),
+                        合致A=", ".join(matched_a) if use_a else "-",
+                        合致B=", ".join(matched_b) if use_b else "-"
+                    ))
+            except Exception:
+                continue
 
-                    item = {
-                        "コード": code,
+        progress_bar.progress((b_idx + 1) / total_batches)
+        time.sleep(0.1)
+
+    status_text.empty()
+    st.success(f"スクリーニング完了！ **{len(hits)} 銘柄** がヒットしました。")
+
+    if hits:
+        res_df = pd.DataFrame(hits).sort_values(by="当日前日比", ascending=not is_up)
+        st.dataframe(res_df, use_container_width=True, hide_index=True)
+        csv = res_df.to_csv(index=False).encode("utf-8-sig")
+        st.download_button("📥 CSVダウンロード", data=csv, file_name="screener_results.csv", mime="text/csv")
