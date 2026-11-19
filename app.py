@@ -22,7 +22,7 @@ def get_jpx_tickers():
     if not files:
         st.warning("GitHubにExcelまたはCSVファイルが見つかりません。")
         return pd.DataFrame()
-    target_file = files[0]
+    target_file = files[0]  # ← [0] を修正しました
     try:
         if target_file.endswith(".csv"):
             df = pd.read_csv(target_file)
@@ -151,7 +151,6 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
     code_to_market = dict(zip(target_df["コード"], target_df["市場・商品区分"]))
     codes = target_df["コード"].tolist()
     
-    # 個別の騰落率を小数に変換
     pct1 = pct1_input / 100.0
     pct2 = pct2_input / 100.0
     pct4 = pct4_input / 100.0
@@ -172,31 +171,32 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
         status_text.text(f"株価データ取得中... ({min((b_idx + 1) * batch_size, len(codes)):,} / {len(codes):,} 銘柄)")
         
         try:
-            # 16時前の除外処理を考慮して7日分を取得
             data = yf.download(yf_tickers, period="7d", group_by="ticker", progress=False, threads=True)
         except Exception:
+            progress_bar.progress((b_idx + 1) / total_batches)
+            continue
+
+        if data is None or data.empty:
             progress_bar.progress((b_idx + 1) / total_batches)
             continue
 
         for code in batch_codes:
             ticker_str = f"{code}.T"
             try:
-                if len(batch_codes) == 1:
+                if not isinstance(data.columns, pd.MultiIndex):
                     df = data.dropna(how="all")
                 else:
-                    if ticker_str not in data.columns.levels[0]:
+                    if ticker_str not in data.columns.get_level_values(0):
                         continue
                     df = data[ticker_str].dropna(how="all")
 
                 if df.empty:
                     continue
 
-                # 【16時で日付を切り替える処理】
-                # 16時前の場合は「今日（today_date）」の行を除外することで、
-                # 16時になった瞬間に「2日前→1日前」「前日(1日前)→当日」にシフトする
+                # タイムゾーン付きインデックスでも安全に日付比較できるように処理
+                idx_dates = pd.to_datetime(df.index).date
                 if not is_after_16:
-                    while not df.empty and df.index[-1].date() >= today_date:
-                        df = df.iloc[:-1]
+                    df = df[idx_dates < today_date]
 
                 if len(df) < 3:
                     continue
@@ -205,12 +205,15 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
                 if not all(col in df.columns for col in req_cols):
                     continue
 
-                c2 = float(df["Close"].iloc[-3])  # 2日前
-                o1 = float(df["Open"].iloc[-2])   # 1日前 (グループA)
-                c1 = float(df["Close"].iloc[-2])  # 1日前 (グループA)
-                v1 = float(df["Volume"].iloc[-2]) # 1日前出来高
-                o0 = float(df["Open"].iloc[-1])   # 当日 (グループB)
-                c0 = float(df["Close"].iloc[-1])  # 当日 (グループB)
+                c2 = float(df["Close"].iloc[-3])
+                o1 = float(df["Open"].iloc[-2])
+                c1 = float(df["Close"].iloc[-2])
+                v1 = float(df["Volume"].iloc[-2])
+                o0 = float(df["Open"].iloc[-1])
+                c0 = float(df["Close"].iloc[-1])
+
+                if any(pd.isna([c2, o1, c1, v1, o0, c0])) or c2 == 0 or o1 == 0 or o0 == 0 or c1 == 0:
+                    continue
 
                 date_2 = df.index[-3].strftime("%m/%d")
                 date_1 = df.index[-2].strftime("%m/%d")
@@ -250,7 +253,6 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
                     ]
                     names_b = [f"④当日寄り比(-{pct4_input}%)", f"⑤GU失速(-{pct5_input}%)"]
 
-                # グループA（OR）とグループB（OR）の評価（チェックがないグループはTrue扱い）
                 match_a = any(r for r, flag in zip(res_a, flags_a) if flag) if use_a else True
                 match_b = any(r for r, flag in zip(res_b, flags_b) if flag) if use_b else True
 
