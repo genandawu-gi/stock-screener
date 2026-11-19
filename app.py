@@ -106,15 +106,15 @@ with st.expander("⚙️ スクリーニング条件・対象市場", expanded=T
         pct5_input = st.number_input("⑤の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct5")
 
         st.markdown("---")
-        c6_chk = st.checkbox(f"⑥ 2日前引け比 1日前 ({sign}%以上)", value=False)
+        c6_chk = st.checkbox(f"⑥ 1日前引け比 当日 ({sign}%以上)", value=False)
         pct6_input = st.number_input("⑥の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct6")
 
         st.write("")
-        c7_chk = st.checkbox(f"⑦ 1日前 寄り比 ({sign}%以上)", value=False)
+        c7_chk = st.checkbox(f"⑦ 当日 寄り比 ({sign}%以上)", value=False)
         pct7_input = st.number_input("⑦の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct7")
 
         st.write("")
-        c8_chk = st.checkbox(f"⑧ 1日前 {s_label}", value=False)
+        c8_chk = st.checkbox(f"⑧ 当日 {s_label}", value=False)
 
 
 target_df = pd.DataFrame()
@@ -191,6 +191,7 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
                     continue
 
                 limit1 = get_price_limit(c2)
+                limit0 = get_price_limit(c1)
 
                 if is_up:
                     res_a = [(c1 - c2) / c2 >= pct1, (c1 - o1) / o1 >= pct2, c1 >= c2 + limit1]
@@ -198,22 +199,22 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
                     res_b = [
                         (c0 - o0) / o0 >= pct4,
                         (o0 < c1) and ((c0 - c1) / c1 >= pct5),
-                        (c1 - c2) / c2 >= pct6,
-                        (c1 - o1) / o1 >= pct7,
-                        c1 >= c2 + limit1
+                        (c0 - c1) / c1 >= pct6,
+                        (c0 - o0) / o0 >= pct7,
+                        c0 >= c1 + limit0
                     ]
-                    names_b = [f"④当日寄り比({pct4_input}%)", f"⑤GD反発({pct5_input}%)", f"⑥2日前比({pct6_input}%)", f"⑦1日前寄り比({pct7_input}%)", "⑧1日前S高"]
+                    names_b = [f"④当日寄り比({pct4_input}%)", f"⑤GD反発({pct5_input}%)", f"⑥1日前比({pct6_input}%)", f"⑦当日寄り比({pct7_input}%)", "⑧当日S高"]
                 else:
                     res_a = [(c1 - c2) / c2 <= -pct1, (c1 - o1) / o1 <= -pct2, c1 <= c2 - limit1]
                     names_a = [f"①2日前比(-{pct1_input}%)", f"②1日前寄り比(-{pct2_input}%)", "③S安"]
                     res_b = [
                         (c0 - o0) / o0 <= -pct4,
                         (o0 > c1) and ((c0 - c1) / c1 <= -pct5),
-                        (c1 - c2) / c2 <= -pct6,
-                        (c1 - o1) / o1 <= -pct7,
-                        c1 <= c2 - limit1
+                        (c0 - c1) / c1 <= -pct6,
+                        (c0 - o0) / o0 <= -pct7,
+                        c0 <= c1 - limit0
                     ]
-                    names_b = [f"④当日寄り比(-{pct4_input}%)", f"⑤GU失速(-{pct5_input}%)", f"⑥2日前比(-{pct6_input}%)", f"⑦1日前寄り比(-{pct7_input}%)", "⑧1日前S安"]
+                    names_b = [f"④当日寄り比(-{pct4_input}%)", f"⑤GU失速(-{pct5_input}%)", f"⑥1日前比(-{pct6_input}%)", f"⑦当日寄り比(-{pct7_input}%)", "⑧当日S安"]
 
                 match_a = any(r for r, flag in zip(res_a, flags_a) if flag) if use_a else True
                 match_b = any(r for r, flag in zip(res_b, flags_b) if flag) if use_b else True
