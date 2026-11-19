@@ -3,9 +3,17 @@ import yfinance as yf
 import pandas as pd
 import glob
 import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 st.set_page_config(page_title="東証全銘柄スクリーナー", layout="wide")
 st.title("📱 東証全銘柄カスタムスクリーナー")
+
+# 日本時間の16時判定関数
+def get_jst_status():
+    now_jst = datetime.now(ZoneInfo("Asia/Tokyo"))
+    is_after_16 = now_jst.hour >= 16
+    return now_jst, is_after_16
 
 # GitHubリポジトリ内のExcel/CSVファイルを自動検索して読み込む
 @st.cache_data
@@ -55,6 +63,12 @@ def get_price_limit(base_price):
     return 10000000
 
 jpx_df = get_jpx_tickers()
+now_jst, is_after_16 = get_jst_status()
+
+if is_after_16:
+    st.info(f"🕒 現在時刻: {now_jst.strftime('%Y-%m-%d %H:%M')} (JST) ｜ **【16時以降】グループA（1日前）＝前営業日 ／ グループB（当日）＝本日確定分**")
+else:
+    st.warning(f"🕒 現在時刻: {now_jst.strftime('%Y-%m-%d %H:%M')} (JST) ｜ **【16時前】グループA（1日前）＝2営業日前 ／ グループB（当日）＝前営業日確定分**")
 
 with st.expander("⚙️ スクリーニング条件・対象市場", expanded=True):
     col1, col2 = st.columns(2)
@@ -125,6 +139,9 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
         st.warning("対象銘柄が0件です。")
         st.stop()
 
+    now_jst, is_after_16 = get_jst_status()
+    today_date = now_jst.date()
+
     flags_a = [c1_chk, c2_chk, c3_chk]
     flags_b = [c4_chk, c5_chk]
     use_a = any(flags_a)
@@ -155,8 +172,10 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
         status_text.text(f"株価データ取得中... ({min((b_idx + 1) * batch_size, len(codes)):,} / {len(codes):,} 銘柄)")
         
         try:
-            data = yf.download(yf_tickers, period="5d", group_by="ticker", progress=False, threads=True)
+            # 16時前の除外処理を考慮して7日分を取得
+            data = yf.download(yf_tickers, period="7d", group_by="ticker", progress=False, threads=True)
         except Exception:
+            progress_bar.progress((b_idx + 1) / total_batches)
             continue
 
         for code in batch_codes:
@@ -169,6 +188,16 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
                         continue
                     df = data[ticker_str].dropna(how="all")
 
+                if df.empty:
+                    continue
+
+                # 【16時で日付を切り替える処理】
+                # 16時前の場合は「今日（today_date）」の行を除外することで、
+                # 16時になった瞬間に「2日前→1日前」「前日(1日前)→当日」にシフトする
+                if not is_after_16:
+                    while not df.empty and df.index[-1].date() >= today_date:
+                        df = df.iloc[:-1]
+
                 if len(df) < 3:
                     continue
 
@@ -176,12 +205,16 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
                 if not all(col in df.columns for col in req_cols):
                     continue
 
-                c2 = float(df["Close"].iloc[-3])
-                o1 = float(df["Open"].iloc[-2])
-                c1 = float(df["Close"].iloc[-2])
-                v1 = float(df["Volume"].iloc[-2])
-                o0 = float(df["Open"].iloc[-1])
-                c0 = float(df["Close"].iloc[-1])
+                c2 = float(df["Close"].iloc[-3])  # 2日前
+                o1 = float(df["Open"].iloc[-2])   # 1日前 (グループA)
+                c1 = float(df["Close"].iloc[-2])  # 1日前 (グループA)
+                v1 = float(df["Volume"].iloc[-2]) # 1日前出来高
+                o0 = float(df["Open"].iloc[-1])   # 当日 (グループB)
+                c0 = float(df["Close"].iloc[-1])  # 当日 (グループB)
+
+                date_2 = df.index[-3].strftime("%m/%d")
+                date_1 = df.index[-2].strftime("%m/%d")
+                date_0 = df.index[-1].strftime("%m/%d")
 
                 # ⑦ 1日前売買代金フィルター
                 turn1 = c1 * v1
@@ -222,33 +255,8 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
                 match_b = any(r for r, flag in zip(res_b, flags_b) if flag) if use_b else True
 
                 if match_a and match_b:
-                    hit_tags_a = [n for r, flag, n in zip(res_a, flags_a, names_a) if r and flag]
-                    hit_tags_b = [n for r, flag, n in zip(res_b, flags_b, names_b) if r and flag]
-                    market_short = code_to_market.get(code, "").replace("（内国株式）", "")
-                    
+                    matched_a_str = ", ".join([n for r, flag, n in zip(res_a, flags_a, names_a) if flag and r])
+                    matched_b_str = ", ".join([n for r, flag, n in zip(res_b, flags_b, names_b) if flag and r])
+
                     hits.append({
                         "コード": code,
-                        "銘柄名": code_to_name.get(code, ""),
-                        "市場": market_short,
-                        "2日前終値": f"{c2:,.0f}",
-                        "1日前終値": f"{c1:,.0f} ({(c1-c2)/c2*100:+.1f}%)",
-                        "1日前売買代金": f"{turn1/100_000_000:.1f}億円",
-                        "当日始値": f"{o0:,.0f}",
-                        "当日現在値": f"{c0:,.0f} ({(c0-c1)/c1*100:+.1f}%)",
-                        "該当条件(A)": " / ".join(hit_tags_a) if hit_tags_a else "指定なし",
-                        "該当条件(B)": " / ".join(hit_tags_b) if hit_tags_b else "指定なし"
-                    })
-            except Exception:
-                continue
-
-        progress_bar.progress((b_idx + 1) / total_batches)
-        time.sleep(0.1)
-
-    status_text.empty()
-    progress_bar.empty()
-
-    st.subheader(f"抽出結果: {len(hits)} 件")
-    if hits:
-        st.dataframe(pd.DataFrame(hits), use_container_width=True, hide_index=True)
-    else:
-        st.info("条件に一致する銘柄はありませんでした。数値を緩めて再実行してください。")
