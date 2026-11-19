@@ -257,5 +257,5 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
                     matched_a = [n for r, flag, n in zip(res_a, flags_a, names_a) if flag and r]
                     matched_b = [n for r, flag, n in zip(res_b, flags_b, names_b) if flag and r]
 
-                    hits.append({
+                    item = {
                         "コード": code,
