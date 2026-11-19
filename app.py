@@ -3,15 +3,15 @@ import yfinance as yf
 import pandas as pd
 import glob
 import time
-from datetime import datetime
-from zoneinfo import ZoneInfo
+from datetime import datetime, timezone, timedelta
 
 st.set_page_config(page_title="東証全銘柄スクリーナー", layout="wide")
 st.title("📱 東証全銘柄カスタムスクリーナー")
 
-# 日本時間の16時判定関数
+# 日本時間（JST）の16時判定関数（標準ライブラリのみで確実に動作）
 def get_jst_status():
-    now_jst = datetime.now(ZoneInfo("Asia/Tokyo"))
+    jst = timezone(timedelta(hours=9))
+    now_jst = datetime.now(jst)
     is_after_16 = now_jst.hour >= 16
     return now_jst, is_after_16
 
@@ -22,7 +22,7 @@ def get_jpx_tickers():
     if not files:
         st.warning("GitHubにExcelまたはCSVファイルが見つかりません。")
         return pd.DataFrame()
-    target_file = files[0]  # ← [0] を修正しました
+    target_file = files[0]
     try:
         if target_file.endswith(".csv"):
             df = pd.read_csv(target_file)
@@ -172,7 +172,8 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
         
         try:
             data = yf.download(yf_tickers, period="7d", group_by="ticker", progress=False, threads=True)
-        except Exception:
+        except Exception as e:
+            st.warning(f"データ取得エラー: {e}")
             progress_bar.progress((b_idx + 1) / total_batches)
             continue
 
@@ -193,7 +194,7 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
                 if df.empty:
                     continue
 
-                # タイムゾーン付きインデックスでも安全に日付比較できるように処理
+                # 16時前の場合は本日分を除外して1日分ずらす
                 idx_dates = pd.to_datetime(df.index).date
                 if not is_after_16:
                     df = df[idx_dates < today_date]
@@ -261,4 +262,3 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
                     matched_b_str = ", ".join([n for r, flag, n in zip(res_b, flags_b, names_b) if flag and r])
 
                     hits.append({
-                        "コード": code,
