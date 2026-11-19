@@ -8,7 +8,7 @@ from datetime import datetime, timezone, timedelta
 st.set_page_config(page_title="東証全銘柄スクリーナー", layout="wide")
 st.title("📱 東証全銘柄カスタムスクリーナー")
 
-# 日本時間（JST）の16時判定関数（標準ライブラリのみで確実に動作）
+# 日本時間（JST）の16時判定関数
 def get_jst_status():
     jst = timezone(timedelta(hours=9))
     now_jst = datetime.now(jst)
@@ -22,7 +22,7 @@ def get_jpx_tickers():
     if not files:
         st.warning("GitHubにExcelまたはCSVファイルが見つかりません。")
         return pd.DataFrame()
-    target_file = files[0]
+    target_file = next(iter(files))
     try:
         if target_file.endswith(".csv"):
             df = pd.read_csv(target_file)
