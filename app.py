@@ -3,17 +3,9 @@ import yfinance as yf
 import pandas as pd
 import glob
 import time
-from datetime import datetime, timezone, timedelta
 
 st.set_page_config(page_title="東証全銘柄スクリーナー", layout="wide")
 st.title("📱 東証全銘柄カスタムスクリーナー")
-
-# 日本時間（JST）の16時判定関数
-def get_jst_status():
-    jst = timezone(timedelta(hours=9))
-    now_jst = datetime.now(jst)
-    is_after_16 = now_jst.hour >= 16
-    return now_jst, is_after_16
 
 # GitHubリポジトリ内のExcel/CSVファイルを自動検索して読み込む
 @st.cache_data
@@ -22,7 +14,7 @@ def get_jpx_tickers():
     if not files:
         st.warning("GitHubにExcelまたはCSVファイルが見つかりません。")
         return pd.DataFrame()
-    target_file = next(iter(files))
+    target_file = files[0]
     try:
         if target_file.endswith(".csv"):
             df = pd.read_csv(target_file)
@@ -63,12 +55,6 @@ def get_price_limit(base_price):
     return 10000000
 
 jpx_df = get_jpx_tickers()
-now_jst, is_after_16 = get_jst_status()
-
-if is_after_16:
-    st.info(f"🕒 現在時刻: {now_jst.strftime('%Y-%m-%d %H:%M')} (JST) ｜ **【16時以降】グループA（1日前）＝前営業日 ／ グループB（当日）＝本日確定分**")
-else:
-    st.warning(f"🕒 現在時刻: {now_jst.strftime('%Y-%m-%d %H:%M')} (JST) ｜ **【16時前】グループA（1日前）＝2営業日前 ／ グループB（当日）＝前営業日確定分**")
 
 with st.expander("⚙️ スクリーニング条件・対象市場", expanded=True):
     col1, col2 = st.columns(2)
@@ -139,9 +125,6 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
         st.warning("対象銘柄が0件です。")
         st.stop()
 
-    now_jst, is_after_16 = get_jst_status()
-    today_date = now_jst.date()
-
     flags_a = [c1_chk, c2_chk, c3_chk]
     flags_b = [c4_chk, c5_chk]
     use_a = any(flags_a)
@@ -151,6 +134,7 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
     code_to_market = dict(zip(target_df["コード"], target_df["市場・商品区分"]))
     codes = target_df["コード"].tolist()
     
+    # 個別の騰落率を小数に変換
     pct1 = pct1_input / 100.0
     pct2 = pct2_input / 100.0
     pct4 = pct4_input / 100.0
@@ -171,33 +155,19 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
         status_text.text(f"株価データ取得中... ({min((b_idx + 1) * batch_size, len(codes)):,} / {len(codes):,} 銘柄)")
         
         try:
-            data = yf.download(yf_tickers, period="7d", group_by="ticker", progress=False, threads=True)
-        except Exception as e:
-            st.warning(f"データ取得エラー: {e}")
-            progress_bar.progress((b_idx + 1) / total_batches)
-            continue
-
-        if data is None or data.empty:
-            progress_bar.progress((b_idx + 1) / total_batches)
+            data = yf.download(yf_tickers, period="5d", group_by="ticker", progress=False, threads=True)
+        except Exception:
             continue
 
         for code in batch_codes:
             ticker_str = f"{code}.T"
             try:
-                if not isinstance(data.columns, pd.MultiIndex):
+                if len(batch_codes) == 1:
                     df = data.dropna(how="all")
                 else:
-                    if ticker_str not in data.columns.get_level_values(0):
+                    if ticker_str not in data.columns.levels[0]:
                         continue
                     df = data[ticker_str].dropna(how="all")
-
-                if df.empty:
-                    continue
-
-                # 16時前の場合は本日分を除外して1日分ずらす
-                idx_dates = pd.to_datetime(df.index).date
-                if not is_after_16:
-                    df = df[idx_dates < today_date]
 
                 if len(df) < 3:
                     continue
@@ -212,13 +182,6 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
                 v1 = float(df["Volume"].iloc[-2])
                 o0 = float(df["Open"].iloc[-1])
                 c0 = float(df["Close"].iloc[-1])
-
-                if any(pd.isna([c2, o1, c1, v1, o0, c0])) or c2 == 0 or o1 == 0 or o0 == 0 or c1 == 0:
-                    continue
-
-                date_2 = df.index[-3].strftime("%m/%d")
-                date_1 = df.index[-2].strftime("%m/%d")
-                date_0 = df.index[-1].strftime("%m/%d")
 
                 # ⑦ 1日前売買代金フィルター
                 turn1 = c1 * v1
@@ -254,11 +217,44 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
                     ]
                     names_b = [f"④当日寄り比(-{pct4_input}%)", f"⑤GU失速(-{pct5_input}%)"]
 
+                # グループA（OR）とグループB（OR）の評価（チェックがないグループはTrue扱い）
                 match_a = any(r for r, flag in zip(res_a, flags_a) if flag) if use_a else True
                 match_b = any(r for r, flag in zip(res_b, flags_b) if flag) if use_b else True
 
                 if match_a and match_b:
-                    matched_a_str = ", ".join([n for r, flag, n in zip(res_a, flags_a, names_a) if flag and r])
-                    matched_b_str = ", ".join([n for r, flag, n in zip(res_b, flags_b, names_b) if flag and r])
+                    matched_a = [n for r, flag, n in zip(res_a, flags_a, names_a) if flag and r]
+                    matched_b = [n for r, flag, n in zip(res_b, flags_b, names_b) if flag and r]
 
                     hits.append({
+                        "コード": code,
+                        "銘柄名": code_to_name.get(code, ""),
+                        "市場": code_to_market.get(code, ""),
+                        "1日前終値": round(c1, 1),
+                        "1日前前日比(%)": round((c1 - c2) / c2 * 100, 2),
+                        "1日前売買代金(億)": round(turn1 / 100_000_000, 1),
+                        "当日終値": round(c0, 1),
+                        "当日寄り比(%)": round((c0 - o0) / o0 * 100, 2),
+                        "当日前日比(%)": round((c0 - c1) / c1 * 100, 2),
+                        "合致A(1日前)": ", ".join(matched_a) if use_a else "-",
+                        "合致B(当日)": ", ".join(matched_b) if use_b else "-"
+                    })
+            except Exception:
+                continue
+
+        progress_bar.progress((b_idx + 1) / total_batches)
+        time.sleep(0.1)
+
+    status_text.empty()
+    st.success(f"スクリーニング完了！ **{len(hits)} 銘柄** がヒットしました。")
+
+    if hits:
+        res_df = pd.DataFrame(hits).sort_values(by="当日前日比(%)", ascending=not is_up)
+        st.dataframe(res_df, use_container_width=True, hide_index=True)
+
+        csv = res_df.to_csv(index=False).encode("utf-8-sig")
+        st.download_button(
+            label="📥 CSVダウンロード",
+            data=csv,
+            file_name="screener_results.csv",
+            mime="text/csv"
+        )
