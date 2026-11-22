@@ -83,7 +83,8 @@ with st.expander("⚙️ スクリーニング条件・対象市場", expanded=T
     is_up = "上昇" in direction
     sign = "+" if is_up else "-"
     s_label = "S高" if is_up else "S安"
-    gap_label = "GDスタート＆前日比" if is_up else "GUスタート＆前日比"
+    gap_label_a = "GDスタート＆2日前比" if is_up else "GUスタート＆2日前比"
+    gap_label_b = "GDスタート＆前日比" if is_up else "GUスタート＆前日比"
 
     st.markdown("---")
     st.markdown("**判定条件：『グループA（いずれか1つ）』 かつ 『グループB（いずれか1つ）』**")
@@ -106,7 +107,11 @@ with st.expander("⚙️ スクリーニング条件・対象市場", expanded=T
         pct_a2_input = st.number_input("③の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct_a2")
 
         st.write("")
-        a3_chk = st.checkbox(f"④ 1日前 {s_label}", value=False)
+        a3_chk = st.checkbox(f"④ 1日前 {gap_label_a} ({sign}%以上)", value=False)
+        pct_a3_input = st.number_input("④の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct_a3")
+
+        st.write("")
+        a4_chk = st.checkbox(f"⑤ 1日前 {s_label}", value=False)
 
     # 🅱️ グループB（当日の動き）
     with g_col2:
@@ -116,19 +121,19 @@ with st.expander("⚙️ スクリーニング条件・対象市場", expanded=T
         b_turn_oku = st.number_input("①の基準売買代金 (億円)", min_value=0.0, value=5.0, step=1.0, key="b_turn")
 
         st.write("")
-        b1_chk = st.checkbox(f"② 1日前引け比 当日 ({sign}%以上)", value=False)
+        b1_chk = st.checkbox(f"② 1日前引け比 当日 ({sign}%以上)", value=True)
         pct_b1_input = st.number_input("②の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct_b1")
 
         st.write("")
-        b2_chk = st.checkbox(f"③ 当日 寄り比 ({sign}%以上)", value=False)
+        b2_chk = st.checkbox(f"③ 当日 寄り比 ({sign}%以上)", value=True)
         pct_b2_input = st.number_input("③の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct_b2")
 
         st.write("")
-        b3_chk = st.checkbox(f"④ 当日 {gap_label} ({sign}%以上)", value=False)
+        b3_chk = st.checkbox(f"④ 当日 {gap_label_b} ({sign}%以上)", value=True)
         pct_b3_input = st.number_input("④の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct_b3")
 
         st.write("")
-        b4_chk = st.checkbox(f"⑤ 当日 {s_label}", value=False)
+        b4_chk = st.checkbox(f"⑤ 当日 {s_label}", value=True)
 target_df = pd.DataFrame()
 if not jpx_df.empty:
     m_col = "市場・商品区分"
@@ -149,7 +154,7 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
         st.warning("対象銘柄が0件です。")
         st.stop()
 
-    flags_a = [a_turn_chk, a1_chk, a2_chk, a3_chk]
+    flags_a = [a_turn_chk, a1_chk, a2_chk, a3_chk, a4_chk]
     flags_b = [b_turn_chk, b1_chk, b2_chk, b3_chk, b4_chk]
     use_a = any(flags_a)
     use_b = any(flags_b)
@@ -162,7 +167,7 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
     code_to_market = dict(zip(target_df["コード"], target_df["市場・商品区分"]))
     codes = target_df["コード"].tolist()
 
-    pct_a1, pct_a2 = pct_a1_input / 100.0, pct_a2_input / 100.0
+    pct_a1, pct_a2, pct_a3 = pct_a1_input / 100.0, pct_a2_input / 100.0, pct_a3_input / 100.0
     pct_b1, pct_b2, pct_b3 = pct_b1_input / 100.0, pct_b2_input / 100.0, pct_b3_input / 100.0
 
     min_turn_a = a_turn_oku * 100_000_000
@@ -217,13 +222,15 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
                         turn1 >= min_turn_a,
                         (c1 - c2) / c2 >= pct_a1,
                         (c1 - o1) / o1 >= pct_a2,
+                        (o1 < c2) and ((c1 - c2) / c2 >= pct_a3),
                         c1 >= c2 + limit1,
                     ]
                     names_a = [
                         f"①1日前売買代金({a_turn_oku}億)",
                         f"②2日前比({pct_a1_input}%)",
                         f"③1日前寄り比({pct_a2_input}%)",
-                        "④S高",
+                        f"④1日前GD反発({pct_a3_input}%)",
+                        "⑤S高",
                     ]
                     # グループB（当日）
                     res_b = [
@@ -246,13 +253,15 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
                         turn1 >= min_turn_a,
                         (c1 - c2) / c2 <= -pct_a1,
                         (c1 - o1) / o1 <= -pct_a2,
+                        (o1 > c2) and ((c1 - c2) / c2 <= -pct_a3),
                         c1 <= c2 - limit1,
                     ]
                     names_a = [
                         f"①1日前売買代金({a_turn_oku}億)",
                         f"②2日前比(-{pct_a1_input}%)",
                         f"③1日前寄り比(-{pct_a2_input}%)",
-                        "④S安",
+                        f"④1日前GU失速(-{pct_a3_input}%)",
+                        "⑤S安",
                     ]
                     # グループB（当日）
                     res_b = [
