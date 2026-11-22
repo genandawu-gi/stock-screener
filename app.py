@@ -8,7 +8,6 @@ st.set_page_config(page_title="東証全銘柄スクリーナー", layout="wide"
 st.title("📱 東証全銘柄カスタムスクリーナー")
 
 
-# GitHubリポジトリ内のExcel/CSVファイルを自動検索して読み込む
 @st.cache_data
 def get_jpx_tickers():
     files = glob.glob("*.xls*") + glob.glob("*.csv")
@@ -44,7 +43,6 @@ def get_jpx_tickers():
         return pd.DataFrame()
 
 
-# 東証の制限値幅テーブル
 def get_price_limit(base_price):
     limits = [
         (100, 30), (200, 50), (500, 80), (700, 100), (1000, 150),
@@ -91,50 +89,37 @@ with st.expander("⚙️ スクリーニング条件・対象市場", expanded=T
 
     g_col1, g_col2 = st.columns(2)
 
-    # 🅰️ グループA（1日前の動き）
     with g_col1:
         st.info("🅰️ **グループA（1日前：①AND かつ ②〜⑤OR）**")
-
         a_turn_chk = st.checkbox("① 【必須】1日前売買代金 (億円以上)", value=False)
         a_turn_oku = st.number_input("①の基準売買代金 (億円)", min_value=0.0, value=5.0, step=1.0, key="a_turn")
-
         st.markdown("---")
         a1_chk = st.checkbox(f"② 2日前引け比 1日前 ({sign}%以上)", value=False)
         pct_a1_input = st.number_input("②の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct_a1")
-
         st.write("")
         a2_chk = st.checkbox(f"③ 1日前 寄り比 ({sign}%以上)", value=False)
         pct_a2_input = st.number_input("③の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct_a2")
-
         st.write("")
         a3_chk = st.checkbox(f"④ 1日前 {gap_label_a} ({sign}%以上)", value=False)
         pct_a3_input = st.number_input("④の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct_a3")
-
         st.write("")
         a4_chk = st.checkbox(f"⑤ 1日前 {s_label}", value=False)
 
-    # 🅱️ グループB（当日の動き）
     with g_col2:
         st.success("🅱️ **グループB（当日：①AND かつ ②〜⑤OR）**")
-
         b_turn_chk = st.checkbox("① 【必須】当日売買代金 (億円以上)", value=False)
         b_turn_oku = st.number_input("①の基準売買代金 (億円)", min_value=0.0, value=5.0, step=1.0, key="b_turn")
-
         st.markdown("---")
         b1_chk = st.checkbox(f"② 1日前引け比 当日 ({sign}%以上)", value=True)
         pct_b1_input = st.number_input("②の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct_b1")
-
         st.write("")
         b2_chk = st.checkbox(f"③ 当日 寄り比 ({sign}%以上)", value=True)
         pct_b2_input = st.number_input("③の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct_b2")
-
         st.write("")
         b3_chk = st.checkbox(f"④ 当日 {gap_label_b} ({sign}%以上)", value=True)
         pct_b3_input = st.number_input("④の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct_b3")
-
         st.write("")
         b4_chk = st.checkbox(f"⑤ 当日 {s_label}", value=True)
-
 target_df = pd.DataFrame()
 if not jpx_df.empty:
     m_col = "市場・商品区分"
@@ -211,14 +196,13 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
                 if min(c2, o1, c1, o0, c0) <= 0:
                     continue
 
-                turn1 = c1 * v1  # 1日前売買代金
-                turn0 = c0 * v0  # 当日売買代金
+                turn1 = c1 * v1
+                turn0 = c0 * v0
 
                 limit1 = get_price_limit(c2)
                 limit0 = get_price_limit(c1)
 
                 if is_up:
-                    # グループA（1日前）
                     res_a = [
                         turn1 >= min_turn_a,
                         (c1 - c2) / c2 >= pct_a1,
@@ -233,7 +217,6 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
                         f"④1日前GD反発({pct_a3_input}%)",
                         "⑤S高",
                     ]
-                    # グループB（当日）
                     res_b = [
                         turn0 >= min_turn_b,
                         (c0 - c1) / c1 >= pct_b1,
@@ -249,7 +232,6 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
                         "⑤当日S高",
                     ]
                 else:
-                    # グループA（1日前）
                     res_a = [
                         turn1 >= min_turn_a,
                         (c1 - c2) / c2 <= -pct_a1,
@@ -258,3 +240,65 @@ if st.button("🚀 東証全銘柄から一括スクリーニング開始", type
                         c1 <= c2 - limit1,
                     ]
                     names_a = [
+                        f"①1日前売買代金({a_turn_oku}億)",
+                        f"②2日前比(-{pct_a1_input}%)",
+                        f"③1日前寄り比(-{pct_a2_input}%)",
+                        f"④1日前GU失速(-{pct_a3_input}%)",
+                        "⑤S安",
+                    ]
+                    res_b = [
+                        turn0 >= min_turn_b,
+                        (c0 - c1) / c1 <= -pct_b1,
+                        (c0 - o0) / o0 <= -pct_b2,
+                        (o0 > c1) and ((c0 - c1) / c1 <= -pct_b3),
+                        c0 <= c1 - limit0,
+                    ]
+                    names_b = [
+                        f"①当日売買代金({b_turn_oku}億)",
+                        f"②1日前比(-{pct_b1_input}%)",
+                        f"③当日寄り比(-{pct_b2_input}%)",
+                        f"④GU失速(-{pct_b3_input}%)",
+                        "⑤当日S安",
+                    ]
+
+                cond_a_turn = turn1 >= min_turn_a if a_turn_chk else True
+                cond_a_price = any(r for r, flag in zip(res_a[1:], flags_a[1:]) if flag) if any(flags_a[1:]) else True
+                match_a = (cond_a_turn and cond_a_price) if use_a else True
+
+                cond_b_turn = turn0 >= min_turn_b if b_turn_chk else True
+                cond_b_price = any(r for r, flag in zip(res_b[1:], flags_b[1:]) if flag) if any(flags_b[1:]) else True
+                match_b = (cond_b_turn and cond_b_price) if use_b else True
+
+                if match_a and match_b:
+                    matched_a = [n for r, flag, n in zip(res_a, flags_a, names_a) if flag and r]
+                    matched_b = [n for r, flag, n in zip(res_b, flags_b, names_b) if flag and r]
+                    hits.append({
+                        "コード": code,
+                        "銘柄名": code_to_name.get(code, ""),
+                        "市場": code_to_market.get(code, ""),
+                        "前日終値": round(c1, 1),
+                        "前日比": round((c1 - c2) / c2 * 100, 2),
+                        "1日前売買代金億": round(turn1 / 100_000_000, 1),
+                        "当日終値": round(c0, 1),
+                        "当日前日比": round((c0 - c1) / c1 * 100, 2),
+                        "当日寄り比": round((c0 - o0) / o0 * 100, 2),
+                        "当日売買代金億": round(turn0 / 100_000_000, 1),
+                        "合致A": ", ".join(matched_a) if use_a else "-",
+                        "合致B": ", ".join(matched_b) if use_b else "-"
+                    })
+            except Exception:
+                continue
+
+        progress_bar.progress((b_idx + 1) / total_batches)
+        time.sleep(0.1)
+
+    status_text.empty()
+    st.session_state["res_df"] = pd.DataFrame(hits).sort_values(by="当日前日比", ascending=not is_up) if hits else pd.DataFrame()
+    st.session_state["hit_count"] = len(hits)
+
+if "res_df" in st.session_state:
+    st.success(f"スクリーニング完了！ **{st.session_state['hit_count']} 銘柄** がヒットしました。")
+    if not st.session_state["res_df"].empty:
+        st.dataframe(st.session_state["res_df"], use_container_width=True, hide_index=True)
+        csv = st.session_state["res_df"].to_csv(index=False).encode("utf-8-sig")
+        st.download_button("📥 CSVダウンロード", data=csv, file_name="screener_results.csv", mime="text/csv")
