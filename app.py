@@ -1,11 +1,12 @@
-import streamlit as st
-import yfinance as yf
-import pandas as pd
 import glob
 import time
+import pandas as pd
+import streamlit as st
+import yfinance as yf
 
 st.set_page_config(page_title="東証全銘柄スクリーナー", layout="wide")
 st.title("📱 東証全銘柄カスタムスクリーナー")
+
 
 # GitHubリポジトリ内のExcel/CSVファイルを自動検索して読み込む
 @st.cache_data
@@ -22,20 +23,26 @@ def get_jpx_tickers():
             df = pd.read_excel(target_file, engine="openpyxl")
         else:
             df = pd.read_excel(target_file, engine="xlrd")
-        
-        df.columns = df.columns.str.strip()
-        df["コード"] = df["コード"].astype(str).str.strip().str.replace(".0", "", regex=False)
-        
+
+        df.columns = df.columns.astype(str).str.strip()
+        df["コード"] = (
+            df["コード"]
+            .astype(str)
+            .str.strip()
+            .str.replace(r"\.0$", "", regex=True)
+        )
+
         cols = ["コード", "銘柄名", "市場・商品区分"]
         for c in cols:
             if c not in df.columns:
                 st.error(f"ファイル内に必要な列 '{c}' が見つかりません: {list(df.columns)}")
                 return pd.DataFrame()
-                
-        return df[cols]
+
+        return df[cols].dropna(subset=["コード"]).drop_duplicates(subset=["コード"])
     except Exception as e:
         st.error(f"ファイル（{target_file}）の読み込みに失敗しました: {e}")
         return pd.DataFrame()
+
 
 # 東証の制限値幅テーブル
 def get_price_limit(base_price):
@@ -54,6 +61,7 @@ def get_price_limit(base_price):
             return limit
     return 10000000
 
+
 jpx_df = get_jpx_tickers()
 
 with st.expander("⚙️ スクリーニング条件・対象市場", expanded=True):
@@ -71,7 +79,7 @@ with st.expander("⚙️ スクリーニング条件・対象市場", expanded=T
         )
     with col2:
         direction = st.selectbox("モード切替", ["上昇パターン (+)", "下落パターン (-)"])
-        min_turn_oku = st.number_input("1日前売買代金 (億円以上)", min_value=0.0, value=5.0, step=1.0)
+        min_turn_oku = st.number_input("当日売買代金 (億円以上)", min_value=0.0, value=5.0, step=1.0)
 
     is_up = "上昇" in direction
     sign = "+" if is_up else "-"
@@ -80,167 +88,41 @@ with st.expander("⚙️ スクリーニング条件・対象市場", expanded=T
 
     st.markdown("---")
     st.markdown("**判定条件：『グループA（いずれか1つ）』 かつ 『グループB（いずれか1つ）』**")
-    
+
     g_col1, g_col2 = st.columns(2)
+
+    # 🅰️ グループA（1日前の動き）
     with g_col1:
         st.info("🅰️ **グループA（1日前の動き：OR条件）**")
-        
-        c1_chk = st.checkbox(f"① 2日前引け比 1日前 ({sign}%以上)", value=True)
-        pct1_input = st.number_input("①の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct1")
-        
-        st.write("")
-        c2_chk = st.checkbox(f"② 1日前 寄り比 ({sign}%以上)", value=True)
-        pct2_input = st.number_input("②の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct2")
-        
-        st.write("")
-        c3_chk = st.checkbox(f"③ 1日前 {s_label}", value=True)
 
+        a_turn_chk = st.checkbox("① 1日前売買代金 (億円以上)", value=False)
+        a_turn_oku = st.number_input("①の基準売買代金 (億円)", min_value=0.0, value=5.0, step=1.0, key="a_turn")
+
+        st.write("")
+        a1_chk = st.checkbox(f"② 2日前引け比 1日前 ({sign}%以上)", value=False)
+        pct_a1_input = st.number_input("②の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct_a1")
+
+        st.write("")
+        a2_chk = st.checkbox(f"③ 1日前 寄り比 ({sign}%以上)", value=False)
+        pct_a2_input = st.number_input("③の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct_a2")
+
+        st.write("")
+        a3_chk = st.checkbox(f"④ 1日前 {s_label}", value=False)
+
+    # 🅱️ グループB（当日の動き）
     with g_col2:
         st.success("🅱️ **グループB（当日の動き：OR条件）**")
-        
-        c4_chk = st.checkbox(f"④ 当日 寄り比 ({sign}%以上)", value=True)
-        pct4_input = st.number_input("④の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct4")
-        
-        st.write("")
-        c5_chk = st.checkbox(f"⑤ 当日 {gap_label} ({sign}%以上)", value=True)
-        pct5_input = st.number_input("⑤の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct5")
 
-        st.markdown("---")
-        c6_chk = st.checkbox(f"⑥ 1日前引け比 当日 ({sign}%以上)", value=False)
-        pct6_input = st.number_input("⑥の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct6")
+        b1_chk = st.checkbox(f"① 1日前引け比 当日 ({sign}%以上)", value=True)
+        pct_b1_input = st.number_input("①の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct_b1")
 
         st.write("")
-        c7_chk = st.checkbox(f"⑦ 当日 寄り比 ({sign}%以上)", value=False)
-        pct7_input = st.number_input("⑦の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct7")
+        b2_chk = st.checkbox(f"② 当日 寄り比 ({sign}%以上)", value=True)
+        pct_b2_input = st.number_input("②の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct_b2")
 
         st.write("")
-        c8_chk = st.checkbox(f"⑧ 当日 {s_label}", value=False)
+        b3_chk = st.checkbox(f"③ 当日 {gap_label} ({sign}%以上)", value=False)
+        pct_b3_input = st.number_input("③の基準騰落率 (%)", min_value=0.1, max_value=100.0, value=8.0, step=0.5, key="pct_b3")
 
-
-target_df = pd.DataFrame()
-if not jpx_df.empty:
-    m_col = "市場・商品区分"
-    if market_option == "東証全株式（プライム・スタンダード・グロース）":
-        target_df = jpx_df[jpx_df[m_col].str.contains("プライム|スタンダード|グロース", na=False)]
-    elif market_option == "プライム（内国株式）のみ":
-        target_df = jpx_df[jpx_df[m_col].str.contains("プライム", na=False)]
-    elif market_option == "スタンダード（内国株式）のみ":
-        target_df = jpx_df[jpx_df[m_col].str.contains("スタンダード", na=False)]
-    elif market_option == "グロース（内国株式）のみ":
-        target_df = jpx_df[jpx_df[m_col].str.contains("グロース", na=False)]
-    else:
-        target_df = jpx_df
-    st.caption(f"現在のスキャン対象：{len(target_df):,} 銘柄")
-
-if st.button("🚀 東証全銘柄から一括スクリーニング開始", type="primary", use_container_width=True):
-    if target_df.empty:
-        st.warning("対象銘柄が0件です。")
-        st.stop()
-
-    flags_a = [c1_chk, c2_chk, c3_chk]
-    flags_b = [c4_chk, c5_chk, c6_chk, c7_chk, c8_chk]
-    use_a = any(flags_a)
-    use_b = any(flags_b)
-
-    code_to_name = dict(zip(target_df["コード"], target_df["銘柄名"]))
-    code_to_market = dict(zip(target_df["コード"], target_df["市場・商品区分"]))
-    codes = target_df["コード"].tolist()
-    
-    pct1, pct2 = pct1_input / 100.0, pct2_input / 100.0
-    pct4, pct5 = pct4_input / 100.0, pct5_input / 100.0
-    pct6, pct7 = pct6_input / 100.0, pct7_input / 100.0
-    
-    min_turnover = min_turn_oku * 100_000_000
-    is_up = "上昇" in direction
-    hits = []
-    
-    batch_size = 50
-    total_batches = (len(codes) + batch_size - 1) // batch_size
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-
-    for b_idx in range(total_batches):
-        batch_codes = codes[b_idx * batch_size : (b_idx + 1) * batch_size]
-        yf_tickers = [f"{c}.T" for c in batch_codes]
-        status_text.text(f"株価データ取得中... ({min((b_idx + 1) * batch_size, len(codes)):,} / {len(codes):,} 銘柄)")
-        
-        try:
-            data = yf.download(yf_tickers, period="5d", group_by="ticker", progress=False, threads=True)
-        except Exception:
-            continue
-
-        for code in batch_codes:
-            ticker_str = f"{code}.T"
-            try:
-                if len(batch_codes) == 1:
-                    df = data.dropna(how="all")
-                else:
-                    if ticker_str not in data.columns.get_level_values(0):
-                        continue
-                    df = data[ticker_str].dropna(how="all")
-
-                if len(df) < 3 or not all(c in df.columns for c in ["Open", "Close", "Volume"]):
-                    continue
-
-                c2 = float(df["Close"].iloc[-3])
-                o1, c1, v1 = float(df["Open"].iloc[-2]), float(df["Close"].iloc[-2]), float(df["Volume"].iloc[-2])
-                o0, c0 = float(df["Open"].iloc[-1]), float(df["Close"].iloc[-1])
-
-                turn1 = c1 * v1
-                if turn1 < min_turnover:
-                    continue
-
-                limit1 = get_price_limit(c2)
-                limit0 = get_price_limit(c1)
-
-                if is_up:
-                    res_a = [(c1 - c2) / c2 >= pct1, (c1 - o1) / o1 >= pct2, c1 >= c2 + limit1]
-                    names_a = [f"①2日前比({pct1_input}%)", f"②1日前寄り比({pct2_input}%)", "③S高"]
-                    res_b = [
-                        (c0 - o0) / o0 >= pct4,
-                        (o0 < c1) and ((c0 - c1) / c1 >= pct5),
-                        (c0 - c1) / c1 >= pct6,
-                        (c0 - o0) / o0 >= pct7,
-                        c0 >= c1 + limit0
-                    ]
-                    names_b = [f"④当日寄り比({pct4_input}%)", f"⑤GD反発({pct5_input}%)", f"⑥1日前比({pct6_input}%)", f"⑦当日寄り比({pct7_input}%)", "⑧当日S高"]
-                else:
-                    res_a = [(c1 - c2) / c2 <= -pct1, (c1 - o1) / o1 <= -pct2, c1 <= c2 - limit1]
-                    names_a = [f"①2日前比(-{pct1_input}%)", f"②1日前寄り比(-{pct2_input}%)", "③S安"]
-                    res_b = [
-                        (c0 - o0) / o0 <= -pct4,
-                        (o0 > c1) and ((c0 - c1) / c1 <= -pct5),
-                        (c0 - c1) / c1 <= -pct6,
-                        (c0 - o0) / o0 <= -pct7,
-                        c0 <= c1 - limit0
-                    ]
-                    names_b = [f"④当日寄り比(-{pct4_input}%)", f"⑤GU失速(-{pct5_input}%)", f"⑥1日前比(-{pct6_input}%)", f"⑦当日寄り比(-{pct7_input}%)", "⑧当日S安"]
-
-                match_a = any(r for r, flag in zip(res_a, flags_a) if flag) if use_a else True
-                match_b = any(r for r, flag in zip(res_b, flags_b) if flag) if use_b else True
-
-                if match_a and match_b:
-                    matched_a = [n for r, flag, n in zip(res_a, flags_a, names_a) if flag and r]
-                    matched_b = [n for r, flag, n in zip(res_b, flags_b, names_b) if flag and r]
-                    hits.append(dict(
-                        コード=code, 銘柄名=code_to_name.get(code, ""), 市場=code_to_market.get(code, ""),
-                        前日終値=round(c1, 1), 前日比=round((c1 - c2) / c2 * 100, 2),
-                        売買代金億=round(turn1 / 100_000_000, 1), 当日終値=round(c0, 1),
-                        当日寄り比=round((c0 - o0) / o0 * 100, 2), 当日前日比=round((c0 - c1) / c1 * 100, 2),
-                        合致A=", ".join(matched_a) if use_a else "-",
-                        合致B=", ".join(matched_b) if use_b else "-"
-                    ))
-            except Exception:
-                continue
-
-        progress_bar.progress((b_idx + 1) / total_batches)
-        time.sleep(0.1)
-
-    status_text.empty()
-    st.success(f"スクリーニング完了！ **{len(hits)} 銘柄** がヒットしました。")
-
-    if hits:
-        res_df = pd.DataFrame(hits).sort_values(by="当日前日比", ascending=not is_up)
-        st.dataframe(res_df, use_container_width=True, hide_index=True)
-        csv = res_df.to_csv(index=False).encode("utf-8-sig")
-        st.download_button("📥 CSVダウンロード", data=csv, file_name="screener_results.csv", mime="text/csv")
+        st.write("")
+        b4_chk = st.checkbox(f"④ 当日 {s_label}", value=True)
