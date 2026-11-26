@@ -5,65 +5,45 @@ import streamlit as st
 import yfinance as yf
 
 st.set_page_config(page_title="東証全銘柄スクリーナー", layout="wide")
-st.title("📱 東証カスタムスクリーナー（ETF・100円以下除外 / 下落時貸借限定）")
+st.title("📱 東証カスタムスクリーナー（ETF・100円以下除外版）")
 
 
 @st.cache_data
 def get_jpx_tickers():
-    files = sorted(glob.glob("*.xls*") + glob.glob("*.csv"))
+    files = glob.glob("*.xls*") + glob.glob("*.csv")
     if not files:
         st.warning("GitHubにExcelまたはCSVファイルが見つかりません。")
-        return pd.DataFrame(), False
+        return pd.DataFrame()
+    target_file = next(iter(files))
+    try:
+        if target_file.endswith(".csv"):
+            df = pd.read_csv(target_file)
+        elif target_file.endswith(".xlsx"):
+            df = pd.read_excel(target_file, engine="openpyxl")
+        else:
+            df = pd.read_excel(target_file, engine="xlrd")
 
-    jpx_df = pd.DataFrame()
-    taishaku_codes = set()
-    has_taishaku_info = False
+        df.columns = df.columns.astype(str).str.strip()
+        df["コード"] = (
+            df["コード"]
+            .astype(str)
+            .str.strip()
+            .str.replace(r"\.0$", "", regex=True)
+        )
 
-    for f in files:
-        try:
-            if f.endswith(".csv"):
-                temp_df = pd.read_csv(f)
-            elif f.endswith(".xlsx"):
-                temp_df = pd.read_excel(f, engine="openpyxl")
-            else:
-                temp_df = pd.read_excel(f, engine="xlrd")
-            temp_df.columns = temp_df.columns.astype(str).str.strip()
+        cols = ["コード", "銘柄名", "市場・商品区分"]
+        for c in cols:
+            if c not in df.columns:
+                st.error(f"ファイル内に必要な列 '{c}' が見つかりません: {list(df.columns)}")
+                return pd.DataFrame()
 
-            # 銘柄一覧ファイル（コード・銘柄名・市場・商品区分があるもの）
-            if all(c in temp_df.columns for c in ["コード", "銘柄名", "市場・商品区分"]) and jpx_df.empty:
-                temp_df["コード"] = temp_df["コード"].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
-                jpx_df = temp_df.copy()
+        df = df[df["市場・商品区分"].str.contains("プライム|スタンダード|グロース", na=False)]
+        df = df[~df["市場・商品区分"].str.contains("ETF|ETN|REIT|インフラ|出資証券|TOKYO PRO", na=False)]
 
-            # 貸借銘柄の判定（同ファイル内の列、または別ファイルの貸借一覧から抽出）
-            taishaku_cols = [c for c in temp_df.columns if any(k in c for k in ["貸借", "信用区分", "制度信用"])]
-            if taishaku_cols and "コード" in temp_df.columns:
-                has_taishaku_info = True
-                temp_df["コード"] = temp_df["コード"].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
-                t_col = taishaku_cols[0]
-                matched = temp_df[temp_df[t_col].astype(str).str.contains("貸借|1", na=False)]["コード"]
-                taishaku_codes.update(matched.tolist())
-            elif any(k in f for k in ["貸借", "taishaku", "信用"]) and "コード" in temp_df.columns:
-                has_taishaku_info = True
-                temp_df["コード"] = temp_df["コード"].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
-                taishaku_codes.update(temp_df["コード"].dropna().tolist())
-        except Exception:
-            continue
-
-    if jpx_df.empty:
-        st.error("有効なJPX銘柄一覧ファイルが見つかりません。")
-        return pd.DataFrame(), False
-
-    # ETF・REIT・ETN等を完全除外
-    jpx_df = jpx_df[jpx_df["市場・商品区分"].str.contains("プライム|スタンダード|グロース", na=False)]
-    jpx_df = jpx_df[~jpx_df["市場・商品区分"].str.contains("ETF|ETN|REIT|インフラ|出資証券|TOKYO PRO", na=False)]
-    jpx_df = jpx_df[["コード", "銘柄名", "市場・商品区分"]].dropna(subset=["コード"]).drop_duplicates(subset=["コード"])
-
-    if has_taishaku_info:
-        jpx_df["貸借"] = jpx_df["コード"].isin(taishaku_codes)
-    else:
-        jpx_df["貸借"] = True
-
-    return jpx_df, has_taishaku_info
+        return df[cols].dropna(subset=["コード"]).drop_duplicates(subset=["コード"])
+    except Exception as e:
+        st.error(f"ファイル（{target_file}）の読み込みに失敗しました: {e}")
+        return pd.DataFrame()
 
 
 def get_price_limit(base_price):
@@ -83,7 +63,7 @@ def get_price_limit(base_price):
     return 10000000
 
 
-jpx_df, has_taishaku_info = get_jpx_tickers()
+jpx_df = get_jpx_tickers()
 
 with st.expander("⚙️ スクリーニング条件・対象市場", expanded=True):
     col1, col2, col3 = st.columns(3)
@@ -100,12 +80,9 @@ with st.expander("⚙️ スクリーニング条件・対象市場", expanded=T
     with col2:
         direction = st.selectbox("モード切替", ["上昇パターン (+)", "下落パターン (-)"])
     with col3:
-        min_price = st.number_input("最低株価フィルタ (円超)", min_value=0, value=100, step=10, help="この価格以下の低位株を除外します")
+        min_price = st.number_input("最低株価フィルタ (円超)", min_value=0, value=100, step=10, help="この価格以下の低位株を除外します（デフォルト: 100円以下を除外）")
 
     is_up = "上昇" in direction
-    if not is_up and not has_taishaku_info:
-        st.warning("⚠️ 貸借銘柄データ（ファイル名に「貸借」を含むCSV/Excel、または「貸借」列）が見つからないため、全銘柄を対象にします。")
-
     sign = "+" if is_up else "-"
     s_label = "S高" if is_up else "S安"
     gap_label_a = "GDスタート＆2日前比" if is_up else "GUスタート＆2日前比"
@@ -159,12 +136,7 @@ if not jpx_df.empty:
     elif market_option == "グロース（内国株式）のみ":
         target_df = jpx_df[jpx_df[m_col].str.contains("グロース", na=False)]
 
-    # 下落パターンの場合のみ貸借銘柄に絞り込み
-    if not is_up:
-        target_df = target_df[target_df["貸借"] == True]
-
-    taishaku_note = " / 貸借銘柄のみ" if (not is_up and has_taishaku_info) else ""
-    st.caption(f"現在のスキャン対象：{len(target_df):,} 銘柄（ETF等除外 / 株価 {min_price}円超{taishaku_note}）")
+    st.caption(f"現在のスキャン対象：{len(target_df):,} 銘柄（ETF・REIT等除外済 / 株価 {min_price}円超のみ抽出）")
 
 if st.button("🚀 スクリーニング開始", type="primary", use_container_width=True):
     if target_df.empty:
